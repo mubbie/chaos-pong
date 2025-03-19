@@ -1,0 +1,13 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Django environment settings
+.env
+
+# SQLite database
+db.sqlite3
