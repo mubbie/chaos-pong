@@ -11,4 +11,10 @@ __pycache__/
 
 # SQLite database
 db.sqlite3
+
+# Amazon Q
 .qodo
+
+# VSCode & Visual Studio
+.vscode/
+.vs/
