@@ -1,20 +1,57 @@
-# Virtual environment
-venv/
+# Go
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
 
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
+# Test binary, built with `go test -c`
+*.test
 
-# Django environment settings
-.env
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
 
-# SQLite database
-db.sqlite3
+# Dependency directories (remove the comment below to include it)
+# vendor/
 
-# Amazon Q
-.qodo
+# Go workspace file
+go.work
 
-# VSCode & Visual Studio
+# TypeScript/Node
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE specific files
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# others
+.qodo/
 .vscode/
-.vs/
