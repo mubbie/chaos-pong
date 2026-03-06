@@ -1,11 +1,22 @@
 import Phaser from 'phaser';
 import { SocketManager } from '../network/socket';
 import { SynthAudio } from '../audio/SynthAudio';
-import type { GameStartPayload, GameStatePayload, GameEndPayload } from '../types/messages';
-import { GameStatus } from '../types/messages';
+import type { GameStartPayload, GameStatePayload, GameEndPayload, PowerUpFieldState, TauntBroadcastPayload, SpectatorReactionBroadcast } from '../types/messages';
+import { GameStatus, PowerUpType, POWERUP_NAMES, POWERUP_COLORS, TAUNT_EMOJIS, REACTION_EMOJIS } from '../types/messages';
+
+// Callback set by main.ts to handle spectator leaving
+export let onLeaveSpectate: (() => void) | null = null;
+export function setOnLeaveSpectate(cb: () => void): void {
+  onLeaveSpectate = cb;
+}
+
+// Callback set by main.ts to handle pause state changes from server
+export let onPauseChanged: ((paused: boolean) => void) | null = null;
+export function setOnPauseChanged(cb: (paused: boolean) => void): void {
+  onPauseChanged = cb;
+}
 
 const COUNTDOWN_TICKS = 180; // 3 seconds * 60 ticks/sec
-const WIN_SCORE = 11;
 
 // Neon color palette
 const P1_COLOR = 0x00f5ff; // cyan
@@ -33,6 +44,7 @@ export class GameScene extends Phaser.Scene {
   private ball!: Phaser.GameObjects.Arc;
   private ballGlow!: Phaser.GameObjects.Graphics;
   private trailGraphics!: Phaser.GameObjects.Graphics;
+  private extraBallGfx!: Phaser.GameObjects.Graphics;
   private centerLine!: Phaser.GameObjects.Graphics;
   private p1NameText!: Phaser.GameObjects.Text;
   private p2NameText!: Phaser.GameObjects.Text;
@@ -47,6 +59,7 @@ export class GameScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wKey!: Phaser.Input.Keyboard.Key;
   private sKey!: Phaser.Input.Keyboard.Key;
+  private tauntKeys: Phaser.Input.Keyboard.Key[] = [];
 
   // Effect state
   private prevState: GameStatePayload | null = null;
@@ -68,6 +81,8 @@ export class GameScene extends Phaser.Scene {
 
   // Rally tracking
   private rallyCount: number = 0;
+  // Dynamic score-to-win (from server or default 11)
+  private winScore: number = 11;
   private rallyText!: Phaser.GameObjects.Text;
 
   // Alert text (match point, deuce, advantage)
@@ -115,18 +130,53 @@ export class GameScene extends Phaser.Scene {
   private arenaBorder!: Phaser.GameObjects.Graphics;
   private borderBaseAlpha: number = 0.25;
 
+  // Power-up rendering
+  private powerUpGfx!: Phaser.GameObjects.Graphics;
+  private powerUpLabel!: Phaser.GameObjects.Text;
+  private shieldGfx!: Phaser.GameObjects.Graphics;
+  private effectIndicatorGfx!: Phaser.GameObjects.Graphics;
+  private frozenOverlayGfx!: Phaser.GameObjects.Graphics;
+  private cannonGlowGfx!: Phaser.GameObjects.Graphics;
+  private powerUpBobOffset: number = 0;
+  private prevPowerUp: PowerUpFieldState | null = null;
+  private prevActiveEffectTypes: Set<number> = new Set();
+  private powerUpSpawnScale: number = 1;
+  private powerUpSpawnRingRadius: number = 0;
+  private powerUpSpawnRingAlpha: number = 0;
+  private prevP1HasCannon: boolean = false;
+  private prevP2HasCannon: boolean = false;
+  private prevExtraBallCount: number = 0;
+  private wasPaused: boolean = false;
+
+  // Dynamic paddle heights (from server state)
+  private leftPaddleHeight: number = 100;
+  private rightPaddleHeight: number = 100;
+
   // Bound callbacks
   private onGameState!: (payload: GameStatePayload) => void;
   private onGameEnd!: (payload: GameEndPayload) => void;
+  private onTaunt!: (payload: TauntBroadcastPayload) => void;
+  private onSpectatorReaction!: (payload: SpectatorReactionBroadcast) => void;
+
+  // Spectator mode
+  private isSpectator: boolean = false;
+  private isTournament: boolean = false;
+  private spectatorLabel!: Phaser.GameObjects.Text;
+  private pausedLabel!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: 'GameScene' });
   }
 
-  init(data: GameStartPayload): void {
+  init(data: GameStartPayload & { isTournament?: boolean }): void {
     this.gameData = data;
+    this.isSpectator = data.isSpectator || false;
+    this.isTournament = data.isTournament || false;
+    this.winScore = data.scoreToWin ?? 11;
     const socket = SocketManager.getInstance();
-    socket.setIdentity(data.you.id, data.you.name);
+    if (!this.isSpectator) {
+      socket.setIdentity(data.you.id, data.you.name);
+    }
   }
 
   create(): void {
@@ -195,6 +245,7 @@ export class GameScene extends Phaser.Scene {
 
     // --- Trail + Glow layers ---
     this.trailGraphics = this.add.graphics().setDepth(2);
+    this.extraBallGfx = this.add.graphics().setDepth(8);
     this.ballGlow = this.add.graphics().setDepth(3);
 
     // --- Ripple layer ---
@@ -328,10 +379,53 @@ export class GameScene extends Phaser.Scene {
       tint: [0xff4400, 0xff8800, 0xffcc00, 0xff0000],
     }).setDepth(4);
 
+    // --- Power-up rendering layers ---
+    this.shieldGfx = this.add.graphics().setDepth(4);
+    this.powerUpGfx = this.add.graphics().setDepth(9);
+    this.effectIndicatorGfx = this.add.graphics().setDepth(9);
+    this.frozenOverlayGfx = this.add.graphics().setDepth(9);
+    this.cannonGlowGfx = this.add.graphics().setDepth(4);
+    this.powerUpLabel = this.add.text(0, 0, '', {
+      fontSize: '12px',
+      color: '#ffffff',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(9).setVisible(false);
+
     // --- Keyboard input ---
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.sKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
+
+    // Helper: check if pause menu is open (shared by taunt key handlers)
+    const isPauseMenuOpen = () => {
+      const overlay = document.getElementById('pause-menu');
+      return overlay != null && !overlay.classList.contains('hidden');
+    };
+
+    if (!this.isSpectator) {
+      // Taunt keys 1-6
+      for (let i = 1; i <= 6; i++) {
+        const key = this.input.keyboard!.addKey(48 + i); // KeyCodes for 1-6
+        key.on('down', () => {
+          if (isPauseMenuOpen()) return;
+          SocketManager.getInstance().send('taunt', { tauntId: i });
+        });
+        this.tauntKeys.push(key);
+      }
+    } else {
+      // Spectator: keys 1-6 send reactions instead of taunts
+      for (let i = 1; i <= 6; i++) {
+        const key = this.input.keyboard!.addKey(48 + i);
+        key.on('down', () => {
+          if (isPauseMenuOpen()) return;
+          SocketManager.getInstance().send('spectator_reaction', { reactionId: i });
+        });
+        this.tauntKeys.push(key);
+      }
+    }
 
     // --- Subscribe to server messages ---
     const socket = SocketManager.getInstance();
@@ -339,19 +433,89 @@ export class GameScene extends Phaser.Scene {
     this.onGameEnd = (payload: GameEndPayload) => this.handleGameEnd(payload);
     socket.on('game_state', this.onGameState);
     socket.on('game_end', this.onGameEnd);
+    this.onTaunt = (payload: TauntBroadcastPayload) => this.handleTaunt(payload);
+    socket.on('taunt', this.onTaunt);
+    this.onSpectatorReaction = (payload: SpectatorReactionBroadcast) => this.handleSpectatorReaction(payload);
+    socket.on('spectator_reaction', this.onSpectatorReaction);
+
+    // Spectator-specific listeners
+    if (this.isSpectator) {
+      const onSpectatorInfo = (info: { player1Name: string; player2Name: string; p1Score: number; p2Score: number }) => {
+        this.p1NameText.setText(info.player1Name);
+        this.p2NameText.setText(info.player2Name);
+        this.p1ScoreText.setText(info.p1Score.toString());
+        this.p2ScoreText.setText(info.p2Score.toString());
+      };
+      socket.on('spectator_info', onSpectatorInfo);
+      // Clean up
+      this.events.on('shutdown', () => {
+        socket.off('spectator_info', onSpectatorInfo);
+      });
+    }
+
+    // Spectator overlay
+    if (this.isSpectator) {
+      this.spectatorLabel = this.add.text(arena.width / 2, 12, 'SPECTATING', {
+        fontSize: '14px',
+        color: '#ffffff',
+        fontFamily: 'monospace',
+        fontStyle: 'bold',
+      }).setOrigin(0.5, 0).setDepth(25).setAlpha(0.4);
+
+      // "LEAVE" button in bottom-right
+      const leaveBtn = this.add.text(arena.width - 10, arena.height - 10, '[LEAVE]', {
+        fontSize: '12px',
+        color: '#ff4444',
+        fontFamily: 'monospace',
+      }).setOrigin(1, 1).setDepth(25).setAlpha(0.6).setInteractive({ useHandCursor: true });
+      leaveBtn.on('pointerover', () => leaveBtn.setAlpha(1));
+      leaveBtn.on('pointerout', () => leaveBtn.setAlpha(0.6));
+      leaveBtn.on('pointerdown', () => {
+        SocketManager.getInstance().send('leave_spectate', {});
+        const sock = SocketManager.getInstance();
+        sock.off('game_state', this.onGameState);
+        sock.off('game_end', this.onGameEnd);
+        sock.off('taunt', this.onTaunt);
+        sock.off('spectator_reaction', this.onSpectatorReaction);
+        if (onLeaveSpectate) onLeaveSpectate();
+      });
+    }
+
+    // Paused overlay label (hidden by default, shown when server says paused)
+    this.pausedLabel = this.add.text(arena.width / 2, arena.height / 2 - 40, 'PAUSED', {
+      fontSize: '36px',
+      color: '#ffffff',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(30).setAlpha(0).setVisible(false);
   }
 
   update(): void {
-    const up = this.cursors.up.isDown || this.wKey.isDown;
-    const down = this.cursors.down.isDown || this.sKey.isDown;
+    // Check if the game is paused (server-authoritative or local overlay for spectators)
+    const pauseOverlay = document.getElementById('pause-menu');
+    const overlayVisible = pauseOverlay != null && !pauseOverlay.classList.contains('hidden');
+    const gamePaused = this.wasPaused || overlayVisible;
 
-    let direction = 0;
-    if (up && !down) direction = -1;
-    else if (down && !up) direction = 1;
+    if (!this.isSpectator) {
+      if (gamePaused) {
+        // Stop paddle movement while paused
+        if (this.lastDirection !== 0) {
+          this.lastDirection = 0;
+          SocketManager.getInstance().send('player_input', { direction: 0 });
+        }
+      } else {
+        const up = this.cursors.up.isDown || this.wKey.isDown;
+        const down = this.cursors.down.isDown || this.sKey.isDown;
 
-    if (direction !== this.lastDirection) {
-      this.lastDirection = direction;
-      SocketManager.getInstance().send('player_input', { direction });
+        let direction = 0;
+        if (up && !down) direction = -1;
+        else if (down && !up) direction = 1;
+
+        if (direction !== this.lastDirection) {
+          this.lastDirection = direction;
+          SocketManager.getInstance().send('player_input', { direction });
+        }
+      }
     }
 
     // Update ripple animations
@@ -381,6 +545,7 @@ export class GameScene extends Phaser.Scene {
 
     // --- Event Detection ---
     let paddleHit = false;
+    let shieldHit = false;
     let wallBounce = false;
     let scored = false;
     let transitionToPlaying = false;
@@ -394,7 +559,28 @@ export class GameScene extends Phaser.Scene {
       if (!scored) {
         if (this.prevState.ball.vx !== 0 &&
             Math.sign(state.ball.vx) !== Math.sign(this.prevState.ball.vx)) {
-          paddleHit = true;
+          // Ball's horizontal velocity flipped — could be a paddle hit or a shield bounce.
+          // Distinguish by checking if an active shield is on the bounce side
+          // and if the ball is closer to the shield than to the paddle.
+          if (state.shield?.active) {
+            const hitLeft = state.ball.vx > 0; // bounced on left side
+            const shieldOnSameSide = (hitLeft && state.shield.side === 0) ||
+                                     (!hitLeft && state.shield.side === 1);
+            if (shieldOnSameSide) {
+              const paddleX = hitLeft ? 30 : arena.width - 30;
+              const distToShield = Math.abs(state.ball.x - state.shield.x);
+              const distToPaddle = Math.abs(state.ball.x - paddleX);
+              if (distToShield < distToPaddle) {
+                shieldHit = true;
+              } else {
+                paddleHit = true;
+              }
+            } else {
+              paddleHit = true;
+            }
+          } else {
+            paddleHit = true;
+          }
         }
         if (this.prevState.ball.vy !== 0 &&
             Math.sign(state.ball.vy) !== Math.sign(this.prevState.ball.vy)) {
@@ -408,13 +594,20 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // Prefer server-authoritative paddleHit flag when available
+    if (state.paddleHit) {
+      paddleHit = true;
+    }
+
     // --- Position Updates ---
     this.leftPaddleY = state.player1.paddleY;
     this.rightPaddleY = state.player2.paddleY;
+    this.leftPaddleHeight = state.player1.paddleHeight || 100;
+    this.rightPaddleHeight = state.player2.paddleHeight || 100;
     this.ball.setPosition(state.ball.x, state.ball.y);
 
-    this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR);
-    this.drawPaddle(this.rightPaddleGfx, arena.width - 30, this.rightPaddleY, P2_COLOR);
+    this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+    this.drawPaddle(this.rightPaddleGfx, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
 
     this.p1ScoreText.setText(state.player1.score.toString());
     this.p2ScoreText.setText(state.player2.score.toString());
@@ -446,21 +639,30 @@ export class GameScene extends Phaser.Scene {
     this.updateBgIntensity(speed);
 
     // --- Paddle Glow ---
-    this.drawPaddleGlow(this.leftPaddleGlow, 30, this.leftPaddleY, P1_COLOR);
-    this.drawPaddleGlow(this.rightPaddleGlow, arena.width - 30, this.rightPaddleY, P2_COLOR);
+    this.drawPaddleGlow(this.leftPaddleGlow, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+    this.drawPaddleGlow(this.rightPaddleGlow, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
 
     // --- Momentum Glow ---
     this.drawMomentumGlow();
 
-    // --- Rally Tracking ---
-    if (paddleHit) {
-      this.rallyCount++;
-      if (this.rallyCount >= 3) {
+    // --- Rally Tracking (prefer server-authoritative count) ---
+    if (state.rallyCount !== undefined) {
+      const prevRally = this.rallyCount;
+      this.rallyCount = state.rallyCount;
+      if (this.rallyCount >= 3 && this.rallyCount > prevRally) {
         this.showRally();
       }
-    }
-    if (scored) {
-      this.rallyCount = 0;
+    } else {
+      // Fallback to client-side tracking
+      if (paddleHit) {
+        this.rallyCount++;
+        if (this.rallyCount >= 3) {
+          this.showRally();
+        }
+      }
+      if (scored) {
+        this.rallyCount = 0;
+      }
     }
 
     // --- Camera Zoom on Rallies ---
@@ -490,12 +692,13 @@ export class GameScene extends Phaser.Scene {
       const hitY = hitLeft ? this.leftPaddleY : this.rightPaddleY;
 
       // Flash paddle white + squash effect
-      this.drawPaddleSquashed(hitGfx, hitX, hitY, 0xffffff);
+      const hitPaddleH = hitLeft ? this.leftPaddleHeight : this.rightPaddleHeight;
+      this.drawPaddleSquashed(hitGfx, hitX, hitY, 0xffffff, hitPaddleH);
       this.time.delayedCall(50, () => {
-        this.drawPaddleStretched(hitGfx, hitX, hitY, hitColor);
+        this.drawPaddleStretched(hitGfx, hitX, hitY, hitColor, hitPaddleH);
       });
       this.time.delayedCall(120, () => {
-        this.drawPaddle(hitGfx, hitX, hitY, hitColor);
+        this.drawPaddle(hitGfx, hitX, hitY, hitColor, hitPaddleH);
       });
 
       // Particles
@@ -506,6 +709,11 @@ export class GameScene extends Phaser.Scene {
       // Screen shake escalates with rally
       const shakeIntensity = Math.min(0.003 + this.rallyCount * 0.001, 0.015);
       this.cameras.main.shake(100, shakeIntensity);
+
+      // Hit stop: brief visual freeze on high-speed hits for dramatic impact
+      if (speed >= 450) {
+        this.skipNextFrames = Math.min(2 + Math.floor((speed - 450) / 75), 4);
+      }
 
       // Ripple effect
       this.addRipple(hitX, state.ball.y, hitColor);
@@ -531,7 +739,16 @@ export class GameScene extends Phaser.Scene {
           hitLeft ? '#00f5ff' : '#ff00e5');
       }
 
-      this.audio.paddleHit();
+      this.audio.paddleHit(state.rallyCount ?? this.rallyCount);
+    }
+
+    // --- Shield Bounce Effects ---
+    if (shieldHit && state.shield) {
+      this.paddleHitEmitter.setPosition(state.ball.x, state.ball.y);
+      this.paddleHitEmitter.setParticleTint(0xffd700); // gold particles
+      this.paddleHitEmitter.explode(10);
+      this.addRipple(state.ball.x, state.ball.y, 0xffd700);
+      this.audio.shieldBlock();
     }
 
     // --- Wall Bounce Effects ---
@@ -638,6 +855,163 @@ export class GameScene extends Phaser.Scene {
       this.countdownText.setVisible(false);
     }
 
+    // --- Ghost Ball ---
+    if (state.ballInvisible) {
+      this.ball.setAlpha(0.08);
+      this.ballGlow.setAlpha(0.05);
+      this.trailGraphics.setAlpha(0.05);
+      this.ballSquashGfx.setAlpha(0.08);
+    } else {
+      this.ball.setAlpha(1);
+      this.ballGlow.setAlpha(1);
+      this.trailGraphics.setAlpha(1);
+      this.ballSquashGfx.setAlpha(1);
+    }
+
+    // --- Shield Rendering ---
+    this.shieldGfx.clear();
+    if (state.shield?.active) {
+      const sx = state.shield.x - state.shield.width / 2;
+      const sy = state.shield.y - state.shield.height / 2;
+      const sw = state.shield.width;
+      const sh = state.shield.height;
+
+      // Outer glow
+      this.shieldGfx.fillStyle(0xffd700, 0.12);
+      this.shieldGfx.fillRect(sx - 6, sy - 6, sw + 12, sh + 12);
+      // Inner glow
+      this.shieldGfx.fillStyle(0xffd700, 0.25);
+      this.shieldGfx.fillRect(sx - 3, sy - 3, sw + 6, sh + 6);
+      // Shield bar
+      this.shieldGfx.fillStyle(0xffd700, 0.7);
+      this.shieldGfx.fillRect(sx, sy, sw, sh);
+    }
+
+    // --- Extra Balls ---
+    this.extraBallGfx.clear();
+    if (state.extraBalls && state.extraBalls.length > 0) {
+      for (const eb of state.extraBalls) {
+        // Glow
+        this.extraBallGfx.fillStyle(0xff6600, 0.15);
+        this.extraBallGfx.fillCircle(eb.x, eb.y, eb.size * 1.5);
+        // Ball
+        this.extraBallGfx.fillStyle(0xff4400, 1);
+        this.extraBallGfx.fillCircle(eb.x, eb.y, eb.size / 2);
+        // Core highlight
+        this.extraBallGfx.fillStyle(0xff8800, 0.7);
+        this.extraBallGfx.fillCircle(eb.x - 2, eb.y - 2, eb.size / 4);
+      }
+
+      // Detect multi-ball activation
+      if (this.prevExtraBallCount === 0) {
+        this.audio.multiBallSplit();
+        this.showCommentary(arena.width / 2, arena.height / 2 - 60, 'MULTI-BALL!', '#ff6600');
+      }
+    }
+    this.prevExtraBallCount = state.extraBalls?.length ?? 0;
+
+    // --- Power-Up Field Rendering ---
+    this.renderFieldPowerUp(state);
+
+    // --- Power-Up Spawn Detection ---
+    const hadPowerUp = this.prevPowerUp != null;
+    const hasPowerUp = state.powerUp != null;
+    if (!hadPowerUp && hasPowerUp) {
+      // Power-up just spawned! Scale-in animation + sound
+      this.powerUpSpawnScale = 0;
+      this.powerUpSpawnRingRadius = 0;
+      this.powerUpSpawnRingAlpha = 0.5;
+      this.tweens.addCounter({
+        from: 0,
+        to: 1,
+        duration: 400,
+        ease: 'Back.easeOut',
+        onUpdate: (tween) => {
+          this.powerUpSpawnScale = tween.getValue() as number;
+        },
+      });
+      // Expanding ring effect
+      this.tweens.addCounter({
+        from: 0,
+        to: 50,
+        duration: 600,
+        ease: 'Power2',
+        onUpdate: (tween) => {
+          this.powerUpSpawnRingRadius = tween.getValue() as number;
+          this.powerUpSpawnRingAlpha = 0.5 * (1 - (tween.getValue() as number) / 50);
+        },
+        onComplete: () => {
+          this.powerUpSpawnRingAlpha = 0;
+        },
+      });
+      // Spawn particles
+      const pu = state.powerUp!;
+      const spawnColor = POWERUP_COLORS[pu.type] ?? 0xffffff;
+      this.paddleHitEmitter.setPosition(pu.x, pu.y);
+      this.paddleHitEmitter.setParticleTint(spawnColor);
+      this.paddleHitEmitter.explode(10);
+
+      this.audio.powerUpSpawn();
+    }
+
+    // --- Power-Up Collection Detection ---
+    if (hadPowerUp && !hasPowerUp) {
+      // Power-up was collected!
+      const pu = this.prevPowerUp!;
+      const puColor = POWERUP_COLORS[pu.type] ?? 0xffffff;
+      const puName = POWERUP_NAMES[pu.type] ?? 'POWER UP';
+
+      // Particle burst at collection point
+      this.paddleHitEmitter.setPosition(pu.x, pu.y);
+      this.paddleHitEmitter.setParticleTint(puColor);
+      this.paddleHitEmitter.explode(20);
+
+      // Commentary
+      this.showCommentary(pu.x, pu.y - 30, puName + '!', '#' + puColor.toString(16).padStart(6, '0'));
+
+      // Sound
+      this.audio.powerUpCollect();
+    }
+    this.prevPowerUp = state.powerUp ? { ...state.powerUp } : null;
+
+    // --- Effect New Detection (for one-shot sounds/effects) ---
+    const currentEffectTypes = new Set((state.activeEffects ?? []).map(e => e.type));
+    for (const effectType of currentEffectTypes) {
+      if (!this.prevActiveEffectTypes.has(effectType)) {
+        // New effect just started
+        if (effectType === PowerUpType.Freeze) this.audio.freezeSound();
+        if (effectType === PowerUpType.GhostBall) this.audio.ghostBallSound();
+      }
+    }
+    this.prevActiveEffectTypes = currentEffectTypes;
+
+    // --- Cannon Fire Detection ---
+    const p1Cannon = state.player1Effects?.hasCannon ?? false;
+    const p2Cannon = state.player2Effects?.hasCannon ?? false;
+    if (this.prevP1HasCannon && !p1Cannon) this.audio.cannonFire();
+    if (this.prevP2HasCannon && !p2Cannon) this.audio.cannonFire();
+    this.prevP1HasCannon = p1Cannon;
+    this.prevP2HasCannon = p2Cannon;
+
+    // --- Effect Indicators ---
+    this.renderEffectIndicators(state);
+
+    // --- Pause Detection ---
+    const nowPaused = state.paused ?? false;
+    if (nowPaused !== this.wasPaused) {
+      this.wasPaused = nowPaused;
+      // Show/hide "PAUSED" label for everyone (players + spectators)
+      if (nowPaused) {
+        this.pausedLabel.setVisible(true).setAlpha(0.6);
+      } else {
+        this.pausedLabel.setVisible(false).setAlpha(0);
+      }
+      // Notify main.ts for player pause menu (not for spectators — they have local-only menu)
+      if (!this.isSpectator && onPauseChanged) {
+        onPauseChanged(nowPaused);
+      }
+    }
+
     // --- Save State ---
     this.prevState = {
       ...state,
@@ -645,6 +1019,80 @@ export class GameScene extends Phaser.Scene {
       player1: { ...state.player1 },
       player2: { ...state.player2 },
     };
+  }
+
+  // --- Taunts ---
+
+  private handleTaunt(data: TauntBroadcastPayload): void {
+    const emoji = TAUNT_EMOJIS[data.tauntId];
+    if (!emoji) return;
+
+    const arena = this.gameData.arena;
+    // Determine which side the taunter is on
+    let taunterSide: 'left' | 'right';
+    if (this.isSpectator && this.prevState) {
+      // For spectators, use actual player IDs from game state
+      // Player1 is always left, Player2 is always right
+      taunterSide = data.playerId === this.prevState.player1.id ? 'left' : 'right';
+    } else if (data.playerId === this.gameData.you.id) {
+      taunterSide = this.gameData.you.side;
+    } else {
+      taunterSide = this.gameData.opponent.side;
+    }
+
+    // Show emoji near taunter's paddle
+    const x = taunterSide === 'left' ? 60 : arena.width - 60;
+    const y = arena.height / 2 - 20;
+
+    const txt = this.add.text(x, y, emoji, {
+      fontSize: '32px',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(20).setAlpha(1);
+
+    this.tweens.add({
+      targets: txt,
+      y: y - 50,
+      alpha: 0,
+      duration: 1500,
+      ease: 'Power2',
+      onComplete: () => txt.destroy(),
+    });
+
+    this.audio.tauntBlip();
+  }
+
+  // --- Spectator Reactions ---
+
+  private handleSpectatorReaction(data: SpectatorReactionBroadcast): void {
+    const emoji = REACTION_EMOJIS[data.reactionId];
+    if (!emoji) return;
+
+    const { arena } = this.gameData;
+
+    // Emoji rain from top: 5-8 copies falling from random X positions
+    const count = 5 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < count; i++) {
+      const x = 50 + Math.random() * (arena.width - 100);
+      const startY = -20 - Math.random() * 40;
+      const delay = Math.random() * 300;
+
+      const txt = this.add.text(x, startY, emoji, {
+        fontSize: '24px',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setDepth(22).setAlpha(0.8);
+
+      this.tweens.add({
+        targets: txt,
+        y: arena.height + 30,
+        alpha: 0,
+        duration: 2000 + Math.random() * 1000,
+        delay,
+        ease: 'Sine.easeIn',
+        onComplete: () => txt.destroy(),
+      });
+    }
+
+    this.audio.tauntBlip();
   }
 
   // --- Commentary ---
@@ -708,7 +1156,7 @@ export class GameScene extends Phaser.Scene {
     let color = '#ff4444';
     let playSound = false;
 
-    const deuceThreshold = WIN_SCORE - 1; // 10
+    const deuceThreshold = this.winScore - 1;
 
     if (p1Score >= deuceThreshold && p2Score >= deuceThreshold) {
       if (p1Score === p2Score) {
@@ -873,18 +1321,18 @@ export class GameScene extends Phaser.Scene {
 
   // --- Drawing Helpers ---
 
-  private drawPaddle(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number): void {
+  private drawPaddle(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number, height: number = 100): void {
     gfx.clear();
     gfx.fillStyle(color);
-    gfx.fillRoundedRect(x - 7.5, y - 50, 15, 100, 4);
+    gfx.fillRoundedRect(x - 7.5, y - height / 2, 15, height, 4);
   }
 
-  private drawPaddleGlow(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number): void {
+  private drawPaddleGlow(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number, height: number = 100): void {
     gfx.clear();
     gfx.fillStyle(color, 0.08);
-    gfx.fillRoundedRect(x - 12, y - 55, 24, 110, 6);
+    gfx.fillRoundedRect(x - 12, y - height / 2 - 5, 24, height + 10, 6);
     gfx.fillStyle(color, 0.04);
-    gfx.fillRoundedRect(x - 16, y - 60, 32, 120, 8);
+    gfx.fillRoundedRect(x - 16, y - height / 2 - 10, 32, height + 20, 8);
   }
 
   private drawBallGlow(x: number, y: number, color: number, radius: number = 8): void {
@@ -954,18 +1402,20 @@ export class GameScene extends Phaser.Scene {
 
   // --- Paddle Squash & Stretch on Hit ---
 
-  private drawPaddleSquashed(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number): void {
+  private drawPaddleSquashed(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number, height: number = 100): void {
     gfx.clear();
     gfx.fillStyle(color);
     // Wider but shorter
-    gfx.fillRoundedRect(x - 10, y - 42, 20, 84, 6);
+    const squashedH = height * 0.84;
+    gfx.fillRoundedRect(x - 10, y - squashedH / 2, 20, squashedH, 6);
   }
 
-  private drawPaddleStretched(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number): void {
+  private drawPaddleStretched(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number, height: number = 100): void {
     gfx.clear();
     gfx.fillStyle(color);
     // Taller but thinner
-    gfx.fillRoundedRect(x - 6, y - 54, 12, 108, 3);
+    const stretchedH = height * 1.08;
+    gfx.fillRoundedRect(x - 6, y - stretchedH / 2, 12, stretchedH, 3);
   }
 
   // --- Paddle Trail ---
@@ -973,6 +1423,8 @@ export class GameScene extends Phaser.Scene {
   private drawPaddleTrail(state: GameStatePayload): void {
     this.paddleTrailGfx.clear();
     const { arena } = this.gameData;
+    const p1H = this.leftPaddleHeight;
+    const p2H = this.rightPaddleHeight;
 
     // Left paddle trail
     const leftDelta = Math.abs(state.player1.paddleY - this.prevLeftPaddleY);
@@ -981,7 +1433,7 @@ export class GameScene extends Phaser.Scene {
       this.paddleTrailGfx.fillStyle(P1_COLOR, alpha * 0.4);
       const minY = Math.min(state.player1.paddleY, this.prevLeftPaddleY);
       const maxY = Math.max(state.player1.paddleY, this.prevLeftPaddleY);
-      this.paddleTrailGfx.fillRoundedRect(30 - 7.5, minY - 50, 15, maxY - minY + 100, 4);
+      this.paddleTrailGfx.fillRoundedRect(30 - 7.5, minY - p1H / 2, 15, maxY - minY + p1H, 4);
     }
 
     // Right paddle trail
@@ -991,7 +1443,7 @@ export class GameScene extends Phaser.Scene {
       this.paddleTrailGfx.fillStyle(P2_COLOR, alpha * 0.4);
       const minY = Math.min(state.player2.paddleY, this.prevRightPaddleY);
       const maxY = Math.max(state.player2.paddleY, this.prevRightPaddleY);
-      this.paddleTrailGfx.fillRoundedRect(arena.width - 30 - 7.5, minY - 50, 15, maxY - minY + 100, 4);
+      this.paddleTrailGfx.fillRoundedRect(arena.width - 30 - 7.5, minY - p2H / 2, 15, maxY - minY + p2H, 4);
     }
   }
 
@@ -1112,16 +1564,215 @@ export class GameScene extends Phaser.Scene {
     return (r << 16) | (g << 8) | b;
   }
 
+  // --- Power-Up Field Rendering ---
+
+  private renderFieldPowerUp(state: GameStatePayload): void {
+    this.powerUpGfx.clear();
+
+    if (!state.powerUp) {
+      this.powerUpLabel.setVisible(false);
+      return;
+    }
+
+    const pu = state.powerUp;
+    const puColor = POWERUP_COLORS[pu.type] ?? 0xffffff;
+    const puName = POWERUP_NAMES[pu.type] ?? '?';
+    const scale = this.powerUpSpawnScale;
+
+    // Floating bob animation
+    this.powerUpBobOffset += 0.05;
+    const bobY = pu.y + Math.sin(this.powerUpBobOffset) * 4;
+
+    // Spawn ring (expanding outward on spawn)
+    if (this.powerUpSpawnRingAlpha > 0.01) {
+      this.powerUpGfx.lineStyle(2, puColor, this.powerUpSpawnRingAlpha);
+      this.powerUpGfx.strokeCircle(pu.x, bobY, this.powerUpSpawnRingRadius);
+    }
+
+    // Pulsing glow ring (scaled)
+    const pulseAlpha = 0.15 + Math.sin(this.powerUpBobOffset * 1.5) * 0.1;
+    this.powerUpGfx.fillStyle(puColor, pulseAlpha * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 22 * scale);
+    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.5 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 30 * scale);
+
+    // Inner icon shape (scaled using canvas transform)
+    if (scale > 0.1) {
+      this.powerUpGfx.save();
+      this.powerUpGfx.translateCanvas(pu.x, bobY);
+      this.powerUpGfx.scaleCanvas(scale, scale);
+      this.powerUpGfx.translateCanvas(-pu.x, -bobY);
+      this.powerUpGfx.fillStyle(puColor, 0.8);
+      this.drawPowerUpIcon(pu.x, bobY, pu.type);
+      this.powerUpGfx.restore();
+    }
+
+    // Label (fades in with scale)
+    this.powerUpLabel.setPosition(pu.x, bobY + 28);
+    this.powerUpLabel.setText(puName);
+    this.powerUpLabel.setColor('#' + puColor.toString(16).padStart(6, '0'));
+    this.powerUpLabel.setAlpha(scale);
+    this.powerUpLabel.setVisible(true);
+  }
+
+  private drawPowerUpIcon(x: number, y: number, type: number): void {
+    const color = POWERUP_COLORS[type] ?? 0xffffff;
+    this.powerUpGfx.fillStyle(color, 0.9);
+
+    switch (type) {
+      case PowerUpType.BigPaddle:
+        // Upward arrow
+        this.powerUpGfx.fillRect(x - 2, y - 8, 4, 16);
+        this.powerUpGfx.fillTriangle(x - 6, y - 4, x + 6, y - 4, x, y - 12);
+        break;
+      case PowerUpType.Shrink:
+        // Downward arrow
+        this.powerUpGfx.fillRect(x - 2, y - 8, 4, 16);
+        this.powerUpGfx.fillTriangle(x - 6, y + 4, x + 6, y + 4, x, y + 12);
+        break;
+      case PowerUpType.SpeedBoost:
+        // Double chevrons >>
+        this.powerUpGfx.fillTriangle(x - 6, y - 6, x - 6, y + 6, x, y);
+        this.powerUpGfx.fillTriangle(x, y - 6, x, y + 6, x + 6, y);
+        break;
+      case PowerUpType.CannonShot:
+        // Circle (cannonball)
+        this.powerUpGfx.fillCircle(x, y, 7);
+        break;
+      case PowerUpType.Freeze:
+        // Snowflake pattern (6 lines)
+        this.powerUpGfx.lineStyle(2, color, 0.9);
+        for (let i = 0; i < 6; i++) {
+          const angle = (i / 6) * Math.PI * 2;
+          this.powerUpGfx.lineBetween(x, y, x + Math.cos(angle) * 9, y + Math.sin(angle) * 9);
+        }
+        break;
+      case PowerUpType.ReverseControls:
+        // Two arrows (up/down swapped)
+        this.powerUpGfx.fillTriangle(x - 4, y + 2, x + 4, y + 2, x, y - 8);
+        this.powerUpGfx.fillTriangle(x - 4, y - 2, x + 4, y - 2, x, y + 8);
+        break;
+      case PowerUpType.GhostBall:
+        // Dashed circle (drawn as dotted ring)
+        this.powerUpGfx.lineStyle(2, color, 0.5);
+        this.powerUpGfx.strokeCircle(x, y, 8);
+        break;
+      case PowerUpType.Shield:
+        // Shield icon (thick bar)
+        this.powerUpGfx.fillRect(x - 3, y - 10, 6, 20);
+        this.powerUpGfx.lineStyle(2, color, 0.9);
+        this.powerUpGfx.strokeRect(x - 5, y - 12, 10, 24);
+        break;
+      default:
+        this.powerUpGfx.fillCircle(x, y, 8);
+    }
+  }
+
+  // --- Effect Indicators ---
+
+  private renderEffectIndicators(state: GameStatePayload): void {
+    this.effectIndicatorGfx.clear();
+    this.frozenOverlayGfx.clear();
+    this.cannonGlowGfx.clear();
+
+    const { arena } = this.gameData;
+    const p1Effects = state.player1Effects;
+    const p2Effects = state.player2Effects;
+
+    // Frozen overlay on paddle
+    if (p1Effects?.frozen) {
+      this.drawFrozenOverlay(30, this.leftPaddleY, this.leftPaddleHeight);
+    }
+    if (p2Effects?.frozen) {
+      this.drawFrozenOverlay(arena.width - 30, this.rightPaddleY, this.rightPaddleHeight);
+    }
+
+    // Reversed controls indicator text
+    if (p1Effects?.reversed) {
+      this.drawReversedIndicator(30, this.leftPaddleY, this.leftPaddleHeight);
+    }
+    if (p2Effects?.reversed) {
+      this.drawReversedIndicator(arena.width - 30, this.rightPaddleY, this.rightPaddleHeight);
+    }
+
+    // Cannon armed glow
+    if (p1Effects?.hasCannon) {
+      this.drawCannonGlow(30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+    }
+    if (p2Effects?.hasCannon) {
+      this.drawCannonGlow(arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
+    }
+
+    // Size change glow indicators
+    if (p1Effects && p1Effects.paddleHeight > 100) {
+      this.drawSizeGlow(30, this.leftPaddleY, this.leftPaddleHeight, 0x22c55e); // green for big
+    }
+    if (p2Effects && p2Effects.paddleHeight > 100) {
+      this.drawSizeGlow(arena.width - 30, this.rightPaddleY, this.rightPaddleHeight, 0x22c55e);
+    }
+    if (p1Effects && p1Effects.paddleHeight < 100 && p1Effects.paddleHeight > 0) {
+      this.drawSizeGlow(30, this.leftPaddleY, this.leftPaddleHeight, 0xff8800); // orange for shrunk
+    }
+    if (p2Effects && p2Effects.paddleHeight < 100 && p2Effects.paddleHeight > 0) {
+      this.drawSizeGlow(arena.width - 30, this.rightPaddleY, this.rightPaddleHeight, 0xff8800);
+    }
+  }
+
+  private drawFrozenOverlay(x: number, y: number, height: number): void {
+    // Ice crystal overlay
+    this.frozenOverlayGfx.fillStyle(0x88ccff, 0.25);
+    this.frozenOverlayGfx.fillRoundedRect(x - 10, y - height / 2 - 3, 20, height + 6, 5);
+
+    // Sparkle particles
+    for (let i = 0; i < 4; i++) {
+      const sparkX = x - 8 + Math.random() * 16;
+      const sparkY = y - height / 2 + Math.random() * height;
+      this.frozenOverlayGfx.fillStyle(0xffffff, 0.6);
+      this.frozenOverlayGfx.fillCircle(sparkX, sparkY, 1.5);
+    }
+  }
+
+  private drawReversedIndicator(x: number, y: number, height: number): void {
+    // Purple tint on paddle
+    this.effectIndicatorGfx.fillStyle(0xaa44ff, 0.15);
+    this.effectIndicatorGfx.fillRoundedRect(x - 10, y - height / 2 - 3, 20, height + 6, 5);
+  }
+
+  private drawCannonGlow(x: number, y: number, baseColor: number, height: number): void {
+    // Pulsing red glow behind paddle
+    const pulse = 0.15 + Math.sin(Date.now() / 150) * 0.1;
+    this.cannonGlowGfx.fillStyle(0xff0044, pulse);
+    this.cannonGlowGfx.fillRoundedRect(x - 14, y - height / 2 - 8, 28, height + 16, 8);
+    this.cannonGlowGfx.fillStyle(0xff0044, pulse * 0.5);
+    this.cannonGlowGfx.fillRoundedRect(x - 18, y - height / 2 - 12, 36, height + 24, 10);
+  }
+
+  private drawSizeGlow(x: number, y: number, height: number, color: number): void {
+    this.effectIndicatorGfx.fillStyle(color, 0.1);
+    this.effectIndicatorGfx.fillRoundedRect(x - 14, y - height / 2 - 5, 28, height + 10, 6);
+  }
+
   // --- Game End ---
 
   private handleGameEnd(data: GameEndPayload): void {
     const socket = SocketManager.getInstance();
     socket.off('game_state', this.onGameState);
     socket.off('game_end', this.onGameEnd);
+    socket.off('taunt', this.onTaunt);
+    socket.off('spectator_reaction', this.onSpectatorReaction);
 
+    if (this.isTournament) {
+      // Tournament players + tournament spectators: main.ts handles cleanup via bracket
+      if (onLeaveSpectate) onLeaveSpectate();
+      return;
+    }
+
+    // Both players and regular spectators go to GameOverScene
     this.scene.start('GameOverScene', {
       ...data,
       myId: socket.myId,
+      you: this.gameData.you,
+      opponent: this.gameData.opponent,
     });
   }
 
@@ -1129,6 +1780,22 @@ export class GameScene extends Phaser.Scene {
     const socket = SocketManager.getInstance();
     socket.off('game_state', this.onGameState);
     socket.off('game_end', this.onGameEnd);
+    socket.off('taunt', this.onTaunt);
+    socket.off('spectator_reaction', this.onSpectatorReaction);
+
+    // Clean up taunt key event listeners to prevent leaks
+    for (const key of this.tauntKeys) {
+      key.removeAllListeners('down');
+    }
+    this.tauntKeys = [];
+
+    // Clean up SynthAudio instance to prevent accumulation in static Set
+    if (this.audio) {
+      this.audio.destroy();
+    }
+
+    this.isSpectator = false;
+    this.isTournament = false;
     this.lastDirection = 0;
     this.prevState = null;
     this.lastCountdownNum = 0;
@@ -1145,5 +1812,17 @@ export class GameScene extends Phaser.Scene {
     this.targetZoom = 1;
     this.slowMoFrames = 0;
     this.skipNextFrames = 0;
+    this.prevPowerUp = null;
+    this.prevActiveEffectTypes = new Set();
+    this.leftPaddleHeight = 100;
+    this.rightPaddleHeight = 100;
+    this.powerUpBobOffset = 0;
+    this.powerUpSpawnScale = 1;
+    this.powerUpSpawnRingRadius = 0;
+    this.powerUpSpawnRingAlpha = 0;
+    this.prevP1HasCannon = false;
+    this.prevP2HasCannon = false;
+    this.prevExtraBallCount = 0;
+    this.wasPaused = false;
   }
 }

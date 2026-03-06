@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/mux"
+	"github.com/mubbie/chaos-pong/backend/internal/config"
 	"github.com/mubbie/chaos-pong/backend/internal/ws"
 )
 
@@ -18,33 +18,23 @@ type StatsProvider interface {
 }
 
 // New creates and configures the HTTP server with all routes.
-func New(hub *ws.Hub, router ws.MessageRouter, stats StatsProvider) *http.Server {
+func New(hub *ws.Hub, router ws.MessageRouter, stats StatsProvider, cfg *config.Config) *http.Server {
 	r := mux.NewRouter()
-	setupRoutes(r, hub, router, stats)
+	setupRoutes(r, hub, router, stats, cfg)
 
 	return &http.Server{
-		Addr:    ":8080",
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: r,
 	}
 }
 
-func setupRoutes(r *mux.Router, hub *ws.Hub, router ws.MessageRouter, stats StatsProvider) {
+func setupRoutes(r *mux.Router, hub *ws.Hub, router ws.MessageRouter, stats StatsProvider, cfg *config.Config) {
 	r.HandleFunc("/api/health", handleHealth).Methods("GET")
 	r.HandleFunc("/api/stats", handleStats(stats)).Methods("GET")
-	r.HandleFunc("/ws", ws.HandleWebSocket(hub, router))
+	r.HandleFunc("/ws", ws.HandleWebSocket(hub, router, cfg.IsOriginAllowed))
 
-	// Serve debug.html explicitly
-	r.HandleFunc("/debug.html", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "../client/debug.html")
-	})
-
-	// Serve production build from client/dist/ if it exists, otherwise client/
-	var fileServer http.Handler
-	if _, err := os.Stat("../client/dist"); err == nil {
-		fileServer = http.FileServer(http.Dir("../client/dist"))
-	} else {
-		fileServer = http.FileServer(http.Dir("../client"))
-	}
+	// Serve frontend assets from the configured static directory
+	fileServer := http.FileServer(http.Dir(cfg.StaticDir))
 	r.PathPrefix("/").Handler(fileServer)
 }
 

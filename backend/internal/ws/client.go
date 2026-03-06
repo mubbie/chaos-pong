@@ -14,6 +14,13 @@ const (
 	pingPeriod     = (pongWait * 9) / 10
 	maxMessageSize = 1024
 	sendBufSize    = 256
+
+	// Rate limiting: allow a burst of messages, then throttle.
+	// A 60 tick/s game client sends ~60 player_input/s + pings.
+	// 120/s burst with 100/s sustained handles that comfortably.
+	rateBurst    = 120 // max tokens in bucket
+	ratePerSec   = 100 // tokens refilled per second
+	rateInterval = 10 * time.Millisecond // refill check interval
 )
 
 // MessageRouter routes decoded messages from a client.
@@ -29,16 +36,24 @@ type Client struct {
 	Conn   *websocket.Conn
 	Hub    *Hub
 	Send   chan []byte
-	RoomID string
-	router MessageRouter
+	RoomID       string
+	TournamentID string
+	router       MessageRouter
 	mu     sync.Mutex
+	closed bool
 }
 
 // SendMessage marshals and enqueues a message for the write pump.
+// Safe to call concurrently, even after the client has been closed.
 func (c *Client) SendMessage(msgType string, payload interface{}) error {
 	data, err := MarshalEnvelope(msgType, payload)
 	if err != nil {
 		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
 	}
 	select {
 	case c.Send <- data:
@@ -46,6 +61,31 @@ func (c *Client) SendMessage(msgType string, payload interface{}) error {
 		log.Printf("[client] send buffer full for %s, dropping message", c.ID)
 	}
 	return nil
+}
+
+// SafeSendRaw enqueues pre-marshalled data for the write pump.
+// Safe to call concurrently, even after the client has been closed.
+func (c *Client) SafeSendRaw(data []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	select {
+	case c.Send <- data:
+	default:
+	}
+}
+
+// Close marks the client as closed and closes the Send channel.
+// Safe to call multiple times.
+func (c *Client) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		close(c.Send)
+	}
 }
 
 // SetRoomID safely sets the room ID for this client.
@@ -62,8 +102,23 @@ func (c *Client) GetRoomID() string {
 	return c.RoomID
 }
 
+// SetTournamentID safely sets the tournament code for this client.
+func (c *Client) SetTournamentID(code string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.TournamentID = code
+}
+
+// GetTournamentID safely gets the tournament code for this client.
+func (c *Client) GetTournamentID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.TournamentID
+}
+
 // ReadPump reads messages from the WebSocket and routes them.
 // Runs in its own goroutine. Blocks until connection closes.
+// Includes a token-bucket rate limiter to prevent message flood abuse.
 func (c *Client) ReadPump(router MessageRouter) {
 	c.router = router
 	defer func() {
@@ -79,6 +134,10 @@ func (c *Client) ReadPump(router MessageRouter) {
 		return nil
 	})
 
+	// Token bucket rate limiter
+	tokens := rateBurst
+	lastRefill := time.Now()
+
 	for {
 		_, message, err := c.Conn.ReadMessage()
 		if err != nil {
@@ -87,6 +146,22 @@ func (c *Client) ReadPump(router MessageRouter) {
 			}
 			return
 		}
+
+		// Refill tokens based on elapsed time
+		now := time.Now()
+		elapsed := now.Sub(lastRefill).Seconds()
+		tokens += int(elapsed * float64(ratePerSec))
+		if tokens > rateBurst {
+			tokens = rateBurst
+		}
+		lastRefill = now
+
+		// Check rate limit
+		if tokens <= 0 {
+			// Drop the message silently (client is flooding)
+			continue
+		}
+		tokens--
 
 		env, err := ParseEnvelope(message)
 		if err != nil {

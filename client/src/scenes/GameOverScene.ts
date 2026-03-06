@@ -1,8 +1,11 @@
 import Phaser from 'phaser';
-import type { GameEndPayload } from '../types/messages';
+import type { GameEndPayload, MatchStatsPayload, RematchStatusPayload, PlayerInfo } from '../types/messages';
+import { SocketManager } from '../network/socket';
 
 interface GameOverData extends GameEndPayload {
   myId: string;
+  you?: PlayerInfo;
+  opponent?: PlayerInfo;
 }
 
 // Callback set by main.ts to handle "play again"
@@ -14,6 +17,7 @@ export function setOnPlayAgain(cb: () => void): void {
 
 export class GameOverScene extends Phaser.Scene {
   private result!: GameOverData;
+  private autoReturnTimer?: Phaser.Time.TimerEvent;
 
   constructor() {
     super({ key: 'GameOverScene' });
@@ -24,9 +28,23 @@ export class GameOverScene extends Phaser.Scene {
   }
 
   create(): void {
-    const isWinner = this.result.winnerId === this.result.myId;
+    const isSpectator = this.result.isSpectator || false;
+    const isWinner = !isSpectator && this.result.winnerId === this.result.myId;
     const centerX = 400;
     const centerY = 300;
+
+    // Determine left/right player names for score label
+    let leftName = '';
+    let rightName = '';
+    if (this.result.you && this.result.opponent) {
+      if (this.result.you.side === 'left') {
+        leftName = this.result.you.name;
+        rightName = this.result.opponent.name;
+      } else {
+        leftName = this.result.opponent.name;
+        rightName = this.result.you.name;
+      }
+    }
 
     // Generate particle texture if not cached
     if (!this.textures.exists('particle')) {
@@ -38,10 +56,20 @@ export class GameOverScene extends Phaser.Scene {
     }
 
     // Result text — scale in from 0
+    let headlineText: string;
+    let headlineColor: string;
+    if (isSpectator) {
+      headlineText = `${this.result.winnerName} WINS!`;
+      headlineColor = '#facc15'; // gold
+    } else {
+      headlineText = isWinner ? 'YOU WIN!' : 'YOU LOSE';
+      headlineColor = isWinner ? '#22c55e' : '#ef4444';
+    }
+
     const resultText = this.add.text(centerX, centerY - 80,
-      isWinner ? 'YOU WIN!' : 'YOU LOSE', {
-      fontSize: '48px',
-      color: isWinner ? '#22c55e' : '#ef4444',
+      headlineText, {
+      fontSize: isSpectator ? '40px' : '48px',
+      color: headlineColor,
       fontFamily: 'monospace',
       fontStyle: 'bold',
     }).setOrigin(0.5).setScale(0);
@@ -53,25 +81,57 @@ export class GameOverScene extends Phaser.Scene {
       ease: 'Back.easeOut',
     });
 
-    // Winner name — slide in from left
-    const winnerText = this.add.text(-200, centerY - 20,
-      `${this.result.winnerName} wins`, {
-      fontSize: '20px',
-      color: '#888888',
-      fontFamily: 'monospace',
-    }).setOrigin(0.5);
+    // Winner name — slide in from left (skip for spectator since headline already has it)
+    let winnerTextY = centerY - 20;
+    if (!isSpectator) {
+      const winnerText = this.add.text(-200, centerY - 20,
+        `${this.result.winnerName} wins`, {
+        fontSize: '20px',
+        color: '#888888',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5);
 
-    this.tweens.add({
-      targets: winnerText,
-      x: centerX,
-      duration: 400,
-      delay: 300,
-      ease: 'Power2',
-    });
+      this.tweens.add({
+        targets: winnerText,
+        x: centerX,
+        duration: 400,
+        delay: 300,
+        ease: 'Power2',
+      });
+    } else {
+      // For spectator, shift things up a bit since no subtitle
+      winnerTextY = centerY - 30;
+    }
+
+    // Player name labels above score
+    if (leftName && rightName) {
+      const nameY = winnerTextY + 15;
+      const leftLabel = this.add.text(centerX - 65, nameY, leftName, {
+        fontSize: '13px',
+        color: '#22d3ee', // cyan
+        fontFamily: 'monospace',
+        fontStyle: 'bold',
+      }).setOrigin(1, 0.5).setAlpha(0);
+
+      const rightLabel = this.add.text(centerX + 65, nameY, rightName, {
+        fontSize: '13px',
+        color: '#d946ef', // fuchsia
+        fontFamily: 'monospace',
+        fontStyle: 'bold',
+      }).setOrigin(0, 0.5).setAlpha(0);
+
+      this.tweens.add({
+        targets: [leftLabel, rightLabel],
+        alpha: 1,
+        duration: 400,
+        delay: 450,
+      });
+    }
 
     // Final score — fade in
-    const scoreText = this.add.text(centerX, centerY + 30,
-      `${this.result.finalScore.player1} - ${this.result.finalScore.player2}`, {
+    const scoreY = winnerTextY + 40;
+    const scoreText = this.add.text(centerX, scoreY,
+      `${this.result.finalScore.player1}  -  ${this.result.finalScore.player2}`, {
       fontSize: '36px',
       color: '#ffffff',
       fontFamily: 'monospace',
@@ -85,8 +145,131 @@ export class GameOverScene extends Phaser.Scene {
       delay: 500,
     });
 
-    // Play again button — fade in then pulse
-    const btn = this.add.text(centerX, centerY + 110, '[ PLAY AGAIN ]', {
+    // --- Match Stats ---
+    let statsBottomY = scoreY + 40;
+    if (this.result.stats) {
+      const stats = this.result.stats;
+      const statsStartY = scoreY + 45;
+      const labelLeftX = centerX - 110;
+      const valueRightX = centerX + 110;
+
+      const statRows = [
+        { label: 'Longest Rally', value: `${stats.longestRally}` },
+        { label: 'Total Rallies', value: `${stats.totalRallies}` },
+        { label: 'Power-ups', value: `${stats.p1PowerUps}  /  ${stats.p2PowerUps}` },
+        { label: 'Max Speed', value: `${Math.round(stats.fastestBallSpeed)}` },
+        { label: 'Paddle Dist', value: `${Math.round(stats.p1PaddleDistance)}  /  ${Math.round(stats.p2PaddleDistance)}` },
+      ];
+
+      statRows.forEach((row, i) => {
+        const y = statsStartY + i * 22;
+        const delay = 800 + i * 100;
+
+        // Label (left-aligned)
+        const label = this.add.text(labelLeftX, y, row.label, {
+          fontSize: '12px',
+          color: '#666666',
+          fontFamily: 'monospace',
+        }).setOrigin(0, 0.5).setAlpha(0);
+
+        // Value (right-aligned, same line)
+        const val = this.add.text(valueRightX, y, row.value, {
+          fontSize: '13px',
+          color: '#ffffff',
+          fontFamily: 'monospace',
+          fontStyle: 'bold',
+        }).setOrigin(1, 0.5).setAlpha(0);
+
+        this.tweens.add({ targets: [label, val], alpha: 1, duration: 300, delay });
+
+        statsBottomY = y + 12;
+      });
+    }
+
+    // --- Rematch / Forfeit / Spectator area ---
+    const socket = SocketManager.getInstance();
+
+    if (isSpectator) {
+      // Spectators: no rematch button, just auto-return timer
+      const timerLabel = this.add.text(centerX, statsBottomY + 30, 'Returning to lobby...', {
+        fontSize: '14px',
+        color: '#666666',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setAlpha(0);
+
+      this.tweens.add({
+        targets: timerLabel,
+        alpha: 1,
+        duration: 300,
+        delay: 600,
+      });
+
+      // Auto-return after 8 seconds
+      this.autoReturnTimer = this.time.delayedCall(8000, () => {
+        if (onPlayAgain) onPlayAgain();
+      });
+    } else if (this.result.isForfeit) {
+      // Show "opponent left" label instead of rematch button
+      const forfeitLabel = this.add.text(centerX, statsBottomY + 30, 'OPPONENT LEFT', {
+        fontSize: '16px',
+        color: '#666666',
+        fontFamily: 'monospace',
+      }).setOrigin(0.5).setAlpha(0);
+
+      this.tweens.add({
+        targets: forfeitLabel,
+        alpha: 1,
+        duration: 300,
+        delay: 600,
+      });
+    } else {
+      const rematchBtn = this.add.text(centerX, statsBottomY + 30, '[ REMATCH ]', {
+        fontSize: '20px',
+        color: '#00f5ff',
+        fontFamily: 'monospace',
+        fontStyle: 'bold',
+      }).setOrigin(0.5).setInteractive({ useHandCursor: true }).setAlpha(0);
+
+      this.tweens.add({
+        targets: rematchBtn,
+        alpha: 1,
+        duration: 300,
+        delay: 600,
+      });
+
+      rematchBtn.on('pointerover', () => rematchBtn.setColor('#ffffff'));
+      rematchBtn.on('pointerout', () => rematchBtn.setColor('#00f5ff'));
+
+      let rematchRequested = false;
+      rematchBtn.on('pointerdown', () => {
+        if (rematchRequested) return;
+        rematchRequested = true;
+        rematchBtn.setText('WAITING...');
+        rematchBtn.setColor('#888888');
+        rematchBtn.disableInteractive();
+        socket.send('rematch_request', { roomId: this.result.roomId });
+      });
+
+      // Listen for rematch status
+      const onRematchStatus = (payload: RematchStatusPayload) => {
+        if (payload.status === 'timeout' || payload.status === 'declined') {
+          rematchBtn.setText('EXPIRED');
+          rematchBtn.setColor('#666666');
+          rematchBtn.disableInteractive();
+        }
+        // 'accepted' is handled in main.ts which will destroy Phaser
+      };
+      socket.on('rematch_status', onRematchStatus);
+
+      // Clean up listener when scene shuts down
+      this.events.on('shutdown', () => {
+        socket.off('rematch_status', onRematchStatus);
+      });
+    }
+
+    // Play again / Return to lobby button — fade in then pulse
+    const btnText = isSpectator ? '[ RETURN TO LOBBY ]' : '[ PLAY AGAIN ]';
+    const btn = this.add.text(centerX, statsBottomY + 70, btnText, {
       fontSize: '20px',
       color: '#ffffff',
       fontFamily: 'monospace',
@@ -113,10 +296,13 @@ export class GameOverScene extends Phaser.Scene {
     btn.on('pointerover', () => btn.setColor('#22c55e'));
     btn.on('pointerout', () => btn.setColor('#ffffff'));
     btn.on('pointerdown', () => {
+      if (this.autoReturnTimer) {
+        this.autoReturnTimer.remove();
+      }
       if (onPlayAgain) onPlayAgain();
     });
 
-    // Victory confetti for the winner
+    // Victory confetti for the winner (not spectators)
     if (isWinner) {
       const zone = new Phaser.GameObjects.Particles.Zones.RandomZone(
         new Phaser.Geom.Rectangle(-200, 0, 400, 1) as unknown as Phaser.Types.GameObjects.Particles.RandomZoneSource

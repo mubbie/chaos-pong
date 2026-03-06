@@ -1,0 +1,27 @@
+# Dependencies (rebuilt in container)
+client/node_modules
+backend/vendor
+
+# Build artifacts (rebuilt in container)
+client/dist
+bin/
+
+# Dev/editor files
+.git
+.gitignore
+*.md
+notes/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
