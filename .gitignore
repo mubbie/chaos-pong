@@ -52,7 +52,10 @@ build/
 ehthumbs.db
 Thumbs.db
 
-# others
+# Build artifacts
+bin/
+
+# Others
 .qodo/
 .vscode/
-.qodo
+.claude/

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chaos Pong</title>
+  <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body class="bg-black text-white min-h-screen flex items-center justify-center font-mono">
+
+  <!-- Lobby -->
+  <div id="lobby" class="text-center">
+    <h1 class="text-5xl font-bold mb-2 tracking-tight">CHAOS PONG</h1>
+    <p class="text-neutral-500 mb-10 text-sm">Real-time multiplayer mayhem</p>
+
+    <div class="mb-8">
+      <input
+        id="name-input"
+        type="text"
+        placeholder="Enter your name"
+        maxlength="16"
+        class="bg-neutral-900 border border-neutral-700 rounded px-4 py-3 text-center text-lg w-64 focus:outline-none focus:border-neutral-500 placeholder:text-neutral-600"
+      >
+    </div>
+
+    <button
+      id="join-btn"
+      class="bg-white text-black font-bold px-8 py-3 rounded text-lg hover:bg-neutral-200 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+    >
+      JOIN QUEUE
+    </button>
+
+    <div id="queue-status" class="mt-6 text-neutral-400 text-sm h-6"></div>
+
+    <div id="last-result" class="mt-8 text-neutral-500 text-sm"></div>
+
+    <!-- HTMX live stats -->
+    <div
+      id="live-stats"
+      class="mt-12 text-neutral-600 text-xs"
+      hx-get="/api/stats"
+      hx-trigger="every 5s"
+      hx-swap="innerHTML"
+    ></div>
+  </div>
+
+  <!-- Game container (hidden until match starts) -->
+  <div id="game-container" class="hidden"></div>
+
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

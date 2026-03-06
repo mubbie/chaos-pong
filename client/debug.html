@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chaos Pong - Debug</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #111;
+            color: #eee;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+        }
+        h1 { margin-bottom: 20px; font-size: 1.5rem; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .section {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .section h2 {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        button {
+            background: #333;
+            color: #eee;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85rem;
+            margin-right: 8px;
+            margin-bottom: 8px;
+        }
+        button:hover { background: #444; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        button.active { background: #2a5a2a; border-color: #4a8a4a; }
+        input {
+            background: #222;
+            color: #eee;
+            border: 1px solid #555;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            width: 200px;
+            margin-right: 8px;
+        }
+        #log {
+            height: 300px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+        .log-entry { padding: 2px 0; border-bottom: 1px solid #222; }
+        .log-entry.sent { color: #6a9fb5; }
+        .log-entry.received { color: #90b060; }
+        .log-entry.system { color: #d08050; }
+        .log-entry.error { color: #d04040; }
+        #status {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            margin-left: 10px;
+        }
+        #status.connected { background: #2a5a2a; }
+        #status.disconnected { background: #5a2a2a; }
+        .game-state {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+            font-size: 0.85rem;
+        }
+        .game-state div { padding: 8px; background: #222; border-radius: 4px; }
+        .game-state .label { color: #888; font-size: 0.75rem; }
+        .controls-hint {
+            color: #666;
+            font-size: 0.8rem;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Chaos Pong <span id="status" class="disconnected">disconnected</span></h1>
+
+        <div class="section">
+            <h2>Connection</h2>
+            <input type="text" id="nameInput" placeholder="Enter your name" value="Player">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        </div>
+
+        <div class="section">
+            <h2>Matchmaking</h2>
+            <button id="joinBtn" onclick="joinQueue()" disabled>Join Queue</button>
+            <button id="leaveBtn" onclick="leaveQueue()" disabled>Leave Queue</button>
+        </div>
+
+        <div class="section">
+            <h2>Game Controls</h2>
+            <button onmousedown="sendInput(-1)" onmouseup="sendInput(0)">Up</button>
+            <button onmousedown="sendInput(1)" onmouseup="sendInput(0)">Down</button>
+            <button onclick="sendInput(0)">Stop</button>
+            <p class="controls-hint">Or use Arrow Keys / W,S while connected</p>
+        </div>
+
+        <div class="section">
+            <h2>Game State</h2>
+            <div class="game-state">
+                <div>
+                    <span class="label">Player 1 (Left)</span><br>
+                    <span id="p1Name">-</span>: <span id="p1Score">0</span><br>
+                    Paddle Y: <span id="p1Paddle">-</span>
+                </div>
+                <div>
+                    <span class="label">Ball</span><br>
+                    X: <span id="ballX">-</span><br>
+                    Y: <span id="ballY">-</span><br>
+                    VX: <span id="ballVX">-</span><br>
+                    VY: <span id="ballVY">-</span>
+                </div>
+                <div>
+                    <span class="label">Player 2 (Right)</span><br>
+                    <span id="p2Name">-</span>: <span id="p2Score">0</span><br>
+                    Paddle Y: <span id="p2Paddle">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Message Log</h2>
+            <button onclick="clearLog()">Clear</button>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let stateUpdateCount = 0;
+
+        function connect() {
+            const name = document.getElementById('nameInput').value || 'Player';
+            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+            ws.onopen = () => {
+                setStatus('connected');
+                logSystem('Connected to server');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('joinBtn').disabled = false;
+            };
+
+            ws.onclose = () => {
+                setStatus('disconnected');
+                logSystem('Disconnected from server');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('joinBtn').disabled = true;
+                document.getElementById('leaveBtn').disabled = true;
+                ws = null;
+            };
+
+            ws.onerror = (err) => {
+                logError('WebSocket error');
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+        }
+
+        function disconnect() {
+            if (ws) ws.close();
+        }
+
+        function joinQueue() {
+            const name = document.getElementById('nameInput').value || 'Player';
+            send('join_queue', { name });
+            document.getElementById('joinBtn').disabled = true;
+            document.getElementById('leaveBtn').disabled = false;
+        }
+
+        function leaveQueue() {
+            send('leave_queue', {});
+            document.getElementById('joinBtn').disabled = false;
+            document.getElementById('leaveBtn').disabled = true;
+        }
+
+        function sendInput(direction) {
+            send('player_input', { direction });
+        }
+
+        function send(type, payload) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            const msg = JSON.stringify({ type, payload });
+            ws.send(msg);
+            if (type !== 'player_input') {
+                logSent(`${type}: ${JSON.stringify(payload)}`);
+            }
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'game_state':
+                    updateGameState(msg.payload);
+                    stateUpdateCount++;
+                    // Only log every 60th state update to avoid flooding
+                    if (stateUpdateCount % 60 === 0) {
+                        logReceived(`game_state: tick ${msg.payload.tick} (${stateUpdateCount} updates)`);
+                    }
+                    break;
+                case 'game_start':
+                    logReceived(`game_start: You are ${msg.payload.you.side} (${msg.payload.you.name}) vs ${msg.payload.opponent.name}`);
+                    stateUpdateCount = 0;
+                    break;
+                case 'score_update':
+                    logReceived(`score_update: ${msg.payload.scorerName} scored! (${msg.payload.player1Score} - ${msg.payload.player2Score})`);
+                    break;
+                case 'game_end':
+                    logReceived(`game_end: ${msg.payload.winnerName} wins! (${msg.payload.finalScore.player1} - ${msg.payload.finalScore.player2})`);
+                    document.getElementById('joinBtn').disabled = false;
+                    break;
+                case 'queue_status':
+                    logReceived(`queue_status: ${msg.payload.status} (position: ${msg.payload.position}, in queue: ${msg.payload.playersInQueue})`);
+                    break;
+                case 'pong':
+                    const latency = Date.now() - msg.payload.clientTime;
+                    logReceived(`pong: latency ${latency}ms`);
+                    break;
+                case 'error':
+                    logError(`${msg.payload.code}: ${msg.payload.message}`);
+                    break;
+                default:
+                    logReceived(`${msg.type}: ${JSON.stringify(msg.payload)}`);
+            }
+        }
+
+        function updateGameState(state) {
+            document.getElementById('p1Name').textContent = state.player1.name || '-';
+            document.getElementById('p1Score').textContent = state.player1.score;
+            document.getElementById('p1Paddle').textContent = state.player1.paddleY.toFixed(1);
+            document.getElementById('p2Name').textContent = state.player2.name || '-';
+            document.getElementById('p2Score').textContent = state.player2.score;
+            document.getElementById('p2Paddle').textContent = state.player2.paddleY.toFixed(1);
+            document.getElementById('ballX').textContent = state.ball.x.toFixed(1);
+            document.getElementById('ballY').textContent = state.ball.y.toFixed(1);
+            document.getElementById('ballVX').textContent = state.ball.vx.toFixed(1);
+            document.getElementById('ballVY').textContent = state.ball.vy.toFixed(1);
+        }
+
+        function setStatus(status) {
+            const el = document.getElementById('status');
+            el.textContent = status;
+            el.className = status;
+        }
+
+        function logSent(text) { addLog(text, 'sent'); }
+        function logReceived(text) { addLog(text, 'received'); }
+        function logSystem(text) { addLog(text, 'system'); }
+        function logError(text) { addLog(text, 'error'); }
+
+        function addLog(text, cls) {
+            const log = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${cls}`;
+            entry.textContent = `[${time}] ${text}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat) return;
+            if (e.key === 'ArrowUp' || e.key === 'w') sendInput(-1);
+            if (e.key === 'ArrowDown' || e.key === 's') sendInput(1);
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'ArrowDown' || e.key === 's') sendInput(0);
+        });
+    </script>
+</body>
+</html>
