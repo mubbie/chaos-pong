@@ -259,6 +259,7 @@ export interface TournamentStatePayload {
   championId?: string;
   championName?: string;
   waitingForContinue?: boolean;
+  activeRoomId?: string;
 }
 
 // --- Power-up types ---
