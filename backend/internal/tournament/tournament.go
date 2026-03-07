@@ -316,3 +316,52 @@ func (t *Tournament) TryConsumeContinue() bool {
 	t.waitingForContinue = false
 	return true
 }
+
+// Snapshot returns a consistent copy of all tournament data under a single lock.
+// This prevents data races when building state payloads.
+type Snapshot struct {
+	Code               string
+	State              TournamentState
+	HostID             string
+	Participants       []Participant
+	Bracket            Bracket
+	WaitingForContinue bool
+	ActiveRoomID       string
+	ChampionID         string
+	ChampionName       string
+}
+
+func (t *Tournament) Snapshot() Snapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	// Copy participants slice
+	parts := make([]Participant, len(t.Participants))
+	copy(parts, t.Participants)
+
+	snap := Snapshot{
+		Code:               t.Code,
+		State:              t.State,
+		HostID:             t.HostID,
+		Participants:       parts,
+		Bracket:            t.Bracket, // struct copy (all value types + pointer fields)
+		WaitingForContinue: t.waitingForContinue,
+		ActiveRoomID:       t.ActiveRoomID,
+	}
+
+	if t.State == StateComplete && t.Bracket.FinalResult != nil {
+		snap.ChampionID = t.Bracket.FinalResult.WinnerID
+		snap.ChampionName = t.Bracket.FinalResult.WinnerName
+	}
+
+	return snap
+}
+
+// GetParticipantsCopy returns a copy of the participants slice (thread-safe).
+func (t *Tournament) GetParticipantsCopy() []Participant {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	parts := make([]Participant, len(t.Participants))
+	copy(parts, t.Participants)
+	return parts
+}

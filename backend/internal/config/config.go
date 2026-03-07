@@ -48,6 +48,13 @@ func Load() *Config {
 	}
 
 	cfg.log()
+
+	// Refuse to start production with wildcard origins
+	if cfg.IsProduction() && cfg.AllowsAllOrigins() {
+		log.Fatal("[config] FATAL: ALLOWED_ORIGINS=* is not allowed in production. " +
+			"Set ALLOWED_ORIGINS to your domain(s), e.g. ALLOWED_ORIGINS=https://chaos-pong.example.com")
+	}
+
 	return cfg
 }
 

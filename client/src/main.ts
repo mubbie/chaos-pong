@@ -69,6 +69,7 @@ let currentTournamentCode = '';
 let isPaused = false;
 let inPrivateLobby = false;
 let continueSent = false;
+let lastTournamentState: TournamentStatePayload | null = null;
 
 // --- Mobile device detection ---
 // Use pointer/hover media query to detect phones/tablets (touch-primary devices).
@@ -88,31 +89,36 @@ const pauseFooterText = document.getElementById('pause-footer-text')!;
 const socket = SocketManager.getInstance();
 socket.connect();
 
-// --- Connection status ---
-socket.on('_connected', () => {
-  queueStatus.textContent = '';
-  // Re-enable join button when reconnected (if lobby is visible)
-  if (!lobby.classList.contains('hidden') && joinBtn.disabled) {
-    joinBtn.disabled = false;
-  }
-});
+// NOTE: Main _connected/_disconnected handlers are at bottom of file (after all DOM setup)
 
-socket.on('_disconnected', () => {
-  if (!lobby.classList.contains('hidden')) {
-    queueStatus.textContent = 'Reconnecting...';
-    queueStatus.style.color = '#f87171'; // red-400
+// --- Name validation helper ---
+function requireName(): string | null {
+  const name = nameInput.value.trim();
+  if (!name) {
+    nameInput.focus();
+    nameInput.setAttribute('placeholder', 'Name required!');
+    // Shake animation
+    nameInput.animate([
+      { transform: 'translateX(0)' },
+      { transform: 'translateX(-6px)' },
+      { transform: 'translateX(6px)' },
+      { transform: 'translateX(-4px)' },
+      { transform: 'translateX(4px)' },
+      { transform: 'translateX(0)' },
+    ], { duration: 350, easing: 'ease-out' });
+    setTimeout(() => {
+      nameInput.setAttribute('placeholder', 'Enter your name');
+    }, 2000);
+    return null;
   }
-});
-
-socket.on('_reconnect_failed', () => {
-  queueStatus.textContent = 'Connection lost. Refresh the page.';
-  queueStatus.style.color = '#f87171';
-  joinBtn.disabled = false;
-});
+  return name;
+}
 
 // --- Lobby logic ---
 joinBtn.addEventListener('click', () => {
-  playerName = nameInput.value.trim() || 'Player';
+  const name = requireName();
+  if (!name) return;
+  playerName = name;
   nameInput.value = playerName;
   const sent = socket.send('join_queue', { name: playerName });
   if (sent) {
@@ -161,20 +167,20 @@ refreshMatchesBtn.addEventListener('click', () => {
 
 // --- Tournament buttons ---
 createTournamentBtn.addEventListener('click', () => {
-  if (!playerName) {
-    playerName = nameInput.value.trim() || 'Player';
-    nameInput.value = playerName;
-  }
+  const name = requireName();
+  if (!name) return;
+  playerName = name;
+  nameInput.value = playerName;
   socket.send('create_tournament', { name: playerName });
 });
 
 joinTournamentBtn.addEventListener('click', () => {
   const code = tournamentCodeInput.value.trim().toUpperCase();
   if (!code) return;
-  if (!playerName) {
-    playerName = nameInput.value.trim() || 'Player';
-    nameInput.value = playerName;
-  }
+  const name = requireName();
+  if (!name) return;
+  playerName = name;
+  nameInput.value = playerName;
   socket.send('join_tournament', { code, name: playerName });
 });
 
@@ -190,14 +196,20 @@ leaveTournamentBtn.addEventListener('click', () => {
   socket.send('leave_tournament', {});
   tournamentLobby.classList.add('hidden');
   currentTournamentCode = '';
+  lastTournamentState = null;
+  continueSent = false;
   lobby.classList.remove('hidden');
 });
 
 // Return to lobby from bracket (both Complete and pending buttons)
 function returnToLobbyFromBracket(): void {
+  // Tell server we're leaving the tournament
+  socket.send('leave_tournament', {});
   tournamentBracket.classList.add('hidden');
   championCelebration.classList.add('hidden');
   currentTournamentCode = '';
+  lastTournamentState = null;
+  continueSent = false;
   lobby.classList.remove('hidden');
   socket.send('list_matches', {});
   startMatchListPolling();
@@ -216,10 +228,10 @@ newTournamentBtn.addEventListener('click', () => {
 
 // --- Private lobby buttons ---
 createPrivateBtn.addEventListener('click', () => {
-  if (!playerName) {
-    playerName = nameInput.value.trim() || 'Player';
-    nameInput.value = playerName;
-  }
+  const name = requireName();
+  if (!name) return;
+  playerName = name;
+  nameInput.value = playerName;
   const scoreToWin = parseInt(privateScoreSelect.value, 10) || 11;
   socket.send('create_private', { name: playerName, scoreToWin });
 });
@@ -227,10 +239,10 @@ createPrivateBtn.addEventListener('click', () => {
 joinPrivateBtn.addEventListener('click', () => {
   const code = privateCodeInput.value.trim().toUpperCase();
   if (!code) return;
-  if (!playerName) {
-    playerName = nameInput.value.trim() || 'Player';
-    nameInput.value = playerName;
-  }
+  const name = requireName();
+  if (!name) return;
+  playerName = name;
+  nameInput.value = playerName;
   socket.send('join_private', { code, name: playerName });
 });
 
@@ -252,6 +264,7 @@ socket.on('private_lobby_created', (payload: PrivateLobbyCreatedPayload) => {
   privateScoreValue.textContent = String(payload.scoreToWin);
   privateSlotHost.textContent = playerName;
   privateLobby.classList.remove('hidden');
+  lobby.classList.add('hidden');
 });
 
 // --- Lobby controls toggle ---
@@ -318,7 +331,10 @@ socket.on('error', (payload: ErrorPayload) => {
     lobby.classList.remove('hidden');
   }
   queueStatus.textContent = payload.message;
-  joinBtn.disabled = false;
+  // Only re-enable join if we're on the lobby screen (not mid-game)
+  if (!lobby.classList.contains('hidden')) {
+    joinBtn.disabled = false;
+  }
 });
 
 // --- Game start: hide lobby, create Phaser ---
@@ -330,6 +346,7 @@ socket.on('game_start', (payload: GameStartPayload) => {
   tournamentLobby.classList.add('hidden');
   privateLobby.classList.add('hidden');
   inPrivateLobby = false;
+  continueSent = false; // Reset so next bracket view shows CONTINUE, not stale STARTING...
   gameContainer.classList.remove('hidden');
   currentRoomId = payload.roomId;
   isSpectating = payload.isSpectator || false;
@@ -338,6 +355,13 @@ socket.on('game_start', (payload: GameStartPayload) => {
   if (matchListInterval) {
     clearInterval(matchListInterval);
     matchListInterval = null;
+  }
+
+  // Destroy any existing Phaser instance to prevent leaks
+  if (phaserGame) {
+    phaserGame.destroy(true);
+    phaserGame = null;
+    gameContainer.innerHTML = '';
   }
 
   phaserGame = new Phaser.Game({
@@ -413,6 +437,7 @@ setOnPlayAgain(() => {
 
 // --- Spectator/tournament leave callback (used by GameScene) ---
 setOnLeaveSpectate(() => {
+  hidePauseMenu();
   isSpectating = false;
   currentRoomId = '';
   if (phaserGame) {
@@ -424,9 +449,12 @@ setOnLeaveSpectate(() => {
   gameContainer.innerHTML = '';
 
   if (currentTournamentCode) {
-    // Tournament: show bracket immediately (tournament_state will update content shortly)
+    // Tournament: show bracket with latest state
     tournamentBracket.classList.remove('hidden');
     lobby.classList.add('hidden');
+    if (lastTournamentState) {
+      updateTournamentUI(lastTournamentState);
+    }
   } else {
     lobby.classList.remove('hidden');
     socket.send('list_matches', {});
@@ -451,8 +479,9 @@ setOnPauseChanged((paused: boolean) => {
 // which handles Phaser cleanup. This handler is a safety net to ensure
 // the bracket is always visible after a tournament game ends.
 socket.on('game_end', (payload: GameEndPayload) => {
-  // Hide mobile HUD on game-over screen (no need for taunts/pause there)
+  // Hide mobile HUD and pause menu on game end
   mobileHud.classList.add('hidden');
+  hidePauseMenu();
 
   if (currentTournamentCode) {
     // Ensure bracket is visible for any tournament participant
@@ -462,14 +491,46 @@ socket.on('game_end', (payload: GameEndPayload) => {
 });
 
 // --- Tournament socket listeners ---
+socket.on('tournament_cancelled', () => {
+  // Tournament was cancelled (a player left) — immediate cleanup for everyone.
+  // The server force-stops any active match, so we destroy everything here.
+  currentTournamentCode = '';
+  lastTournamentState = null;
+  continueSent = false;
+  // Destroy Phaser if a game is running
+  if (phaserGame) {
+    phaserGame.destroy(true);
+    phaserGame = null;
+  }
+
+  // Clean up all tournament & game UI
+  hidePauseMenu();
+  mobileHud.classList.add('hidden');
+  isSpectating = false;
+  currentRoomId = '';
+  tournamentBracket.classList.add('hidden');
+  tournamentLobby.classList.add('hidden');
+  championCelebration.classList.add('hidden');
+  gameContainer.classList.add('hidden');
+  gameContainer.innerHTML = '';
+  lobby.classList.remove('hidden');
+  lastResult.textContent = 'Tournament cancelled — a player left';
+  lastResult.style.color = '#f87171';
+  setTimeout(() => { lastResult.textContent = ''; lastResult.style.color = ''; }, 4000);
+  socket.send('list_matches', {});
+  startMatchListPolling();
+});
+
 socket.on('tournament_created', (payload: TournamentCreatedPayload) => {
   currentTournamentCode = payload.code;
   tournamentCodeDisplay.textContent = payload.code;
   tournamentLobby.classList.remove('hidden');
+  lobby.classList.add('hidden');
 });
 
 socket.on('tournament_state', (payload: TournamentStatePayload) => {
   currentTournamentCode = payload.code;
+  lastTournamentState = payload; // Always save latest state for bracket re-render
 
   // Don't show bracket overlay while a game is actively running
   const gameIsActive = phaserGame !== null && !gameContainer.classList.contains('hidden');
@@ -557,13 +618,8 @@ function updateTournamentUI(payload: TournamentStatePayload): void {
       // Hide champion celebration, show normal bracket UI
       championCelebration.classList.add('hidden');
       bracketHeader.classList.remove('hidden');
-      // Show "Return to Lobby" for non-host users so they can leave bracket
-      const myId2 = SocketManager.getInstance().myId;
-      if (myId2 !== payload.hostId) {
-        bracketCloseBtnPending.classList.remove('hidden');
-      } else {
-        bracketCloseBtnPending.classList.add('hidden');
-      }
+      // Show "Leave Tournament" button for all players between matches
+      bracketCloseBtnPending.classList.remove('hidden');
 
       // Build detailed status message with player names
       const sf1 = payload.semiFinal1;
@@ -601,13 +657,13 @@ function updateTournamentUI(payload: TournamentStatePayload): void {
           // If we already sent continue, keep showing "STARTING..." to avoid duplicate sends
           if (continueSent) {
             bracketContinue.innerHTML = `
-              <button class="bg-cyan-500 text-black font-bold px-8 py-3 rounded text-lg opacity-50 pointer-events-none cursor-not-allowed">
+              <button class="bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-8 py-3 rounded-lg text-lg opacity-50 pointer-events-none cursor-not-allowed tracking-wider">
                 STARTING...
               </button>
             `;
           } else {
             bracketContinue.innerHTML = `
-              <button id="bracket-continue-btn" class="bg-cyan-500 text-black font-bold px-8 py-3 rounded text-lg hover:bg-cyan-400 transition-colors cursor-pointer">
+              <button id="bracket-continue-btn" class="bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-8 py-3 rounded-lg text-lg hover:shadow-[0_0_20px_rgba(0,245,255,0.3)] transition-all duration-200 cursor-pointer tracking-wider">
                 CONTINUE
               </button>
             `;
@@ -627,7 +683,32 @@ function updateTournamentUI(payload: TournamentStatePayload): void {
       } else {
         // Match started or state advanced — reset the flag
         continueSent = false;
-        bracketContinue.innerHTML = '';
+
+        // Check if there's an active match and we're NOT one of the players in it
+        const myId = SocketManager.getInstance().myId;
+        let activeMatch: BracketMatchInfo | undefined;
+        if (payload.state === TournamentState.SemiFinal1) activeMatch = payload.semiFinal1;
+        else if (payload.state === TournamentState.SemiFinal2) activeMatch = payload.semiFinal2;
+        else if (payload.state === TournamentState.Final) activeMatch = payload.finalMatch;
+
+        const isActivePlayer = activeMatch &&
+          (activeMatch.player1?.id === myId || activeMatch.player2?.id === myId);
+
+        if (payload.activeRoomId && activeMatch && !activeMatch.winnerId && !isActivePlayer) {
+          // Non-playing participant: show "Watch Match" button
+          const roomId = payload.activeRoomId;
+          bracketContinue.innerHTML = `
+            <button id="bracket-watch-btn" class="bg-white/[0.06] border border-white/10 text-neutral-300 font-bold px-8 py-3 rounded-lg text-sm hover:border-[#00f5ff]/40 hover:text-[#00f5ff] transition-all duration-200 cursor-pointer tracking-wider">
+              WATCH MATCH
+            </button>
+          `;
+          const watchBtn = document.getElementById('bracket-watch-btn')!;
+          watchBtn.addEventListener('click', () => {
+            socket.send('spectate_match', { roomId });
+          });
+        } else {
+          bracketContinue.innerHTML = '';
+        }
       }
     }
   }
@@ -671,25 +752,25 @@ function renderBracket(payload: TournamentStatePayload): void {
   const matchBox = (label: string, match?: BracketMatchInfo, isActive?: boolean) => {
     if (!match) {
       return `
-        <div class="bg-neutral-900/80 border border-dashed border-neutral-700 rounded-lg p-3 w-[180px]">
+        <div class="bg-white/[0.02] border border-dashed border-white/[0.08] rounded-lg p-3 w-[180px]">
           <div class="text-[10px] text-neutral-600 uppercase tracking-wider mb-2">${label}</div>
           <div class="text-neutral-600 text-xs text-center py-2">TBD</div>
         </div>
       `;
     }
     const hasResult = !!match.winnerId;
-    const borderColor = isActive ? 'border-yellow-400' : (hasResult ? 'border-green-500/60' : 'border-neutral-700');
-    const glowClass = isActive ? 'shadow-[0_0_12px_rgba(250,204,0,0.15)]' : '';
+    const borderColor = isActive ? 'border-yellow-400/70' : (hasResult ? 'border-green-500/40' : 'border-white/[0.08]');
+    const glowClass = isActive ? 'shadow-[0_0_15px_rgba(250,204,0,0.1)]' : '';
 
     return `
-      <div class="bg-neutral-900/80 border ${borderColor} rounded-lg p-3 w-[180px] ${glowClass}">
+      <div class="bg-white/[0.03] border ${borderColor} rounded-lg p-3 w-[180px] ${glowClass}">
         <div class="flex items-center justify-between mb-1">
           <span class="text-[10px] text-neutral-500 uppercase tracking-wider">${label}</span>
           ${statusBadge(match, isActive)}
         </div>
-        <div class="border-t border-neutral-800 mt-1 pt-1">
+        <div class="border-t border-white/[0.06] mt-1 pt-1">
           ${playerRow(match, true)}
-          <div class="border-t border-neutral-800/50"></div>
+          <div class="border-t border-white/[0.04]"></div>
           ${playerRow(match, false)}
         </div>
       </div>
@@ -697,7 +778,7 @@ function renderBracket(payload: TournamentStatePayload): void {
   };
 
   // Horizontal connector line
-  const hLine = () => `<div class="w-6 border-t-2 border-neutral-600 flex-shrink-0"></div>`;
+  const hLine = () => `<div class="w-6 border-t-2 border-white/[0.1] flex-shrink-0"></div>`;
 
   // Build symmetric bracket:
   //   SF1 ──── Final ──── SF2
@@ -864,9 +945,12 @@ pauseLeaveBtn.addEventListener('click', () => {
     gameContainer.classList.add('hidden');
     gameContainer.innerHTML = '';
     if (currentTournamentCode) {
-      // Tournament: show bracket immediately
+      // Tournament: show bracket with latest state
       tournamentBracket.classList.remove('hidden');
       lobby.classList.add('hidden');
+      if (lastTournamentState) {
+        updateTournamentUI(lastTournamentState);
+      }
     } else {
       lobby.classList.remove('hidden');
       socket.send('list_matches', {});
@@ -874,21 +958,23 @@ pauseLeaveBtn.addEventListener('click', () => {
       joinBtn.disabled = false;
     }
   } else {
-    // Leave match (forfeit — send leave_match to server for clean forfeit)
-    socket.send('leave_match', {});
-    currentRoomId = '';
-    isSpectating = false;
-    if (phaserGame) {
-      phaserGame.destroy(true);
-      phaserGame = null;
-    }
-    gameContainer.classList.add('hidden');
-    gameContainer.innerHTML = '';
     if (currentTournamentCode) {
-      // Tournament forfeit: show bracket, tournament_state will update
-      tournamentBracket.classList.remove('hidden');
-      lobby.classList.add('hidden');
+      // Tournament: leaving a match means leaving the tournament entirely
+      // which cancels it for everyone. Server handles all cleanup via
+      // tournament_cancelled message, so just send leave_tournament.
+      socket.send('leave_tournament', {});
+      // Don't do local cleanup — tournament_cancelled handler will handle it
     } else {
+      // Regular match: forfeit
+      socket.send('leave_match', {});
+      currentRoomId = '';
+      isSpectating = false;
+      if (phaserGame) {
+        phaserGame.destroy(true);
+        phaserGame = null;
+      }
+      gameContainer.classList.add('hidden');
+      gameContainer.innerHTML = '';
       lobby.classList.remove('hidden');
       lastResult.textContent = 'You left the match';
       setTimeout(() => { lastResult.textContent = ''; }, 3000);
@@ -911,11 +997,15 @@ function checkAutoSpectate(): void {
     const trySpectate = () => {
       socket.send('spectate_match', { roomId: watchRoomId });
     };
-    // If already connected, spectate immediately; otherwise wait
+    // If already connected, spectate immediately; otherwise wait for one connect
     if (socket.connected) {
       trySpectate();
     } else {
-      socket.on('_connected', trySpectate);
+      const onceConnected = () => {
+        socket.off('_connected', onceConnected);
+        trySpectate();
+      };
+      socket.on('_connected', onceConnected);
     }
   }
 }
@@ -926,7 +1016,9 @@ socket.on('welcome', (payload: { id: string }) => {
 });
 
 // --- Connection status ---
+// --- Connection status (single consolidated handler) ---
 socket.on('_connected', () => {
+  queueStatus.textContent = '';
   joinBtn.disabled = false;
   socket.send('list_matches', {});
   startMatchListPolling();
@@ -934,13 +1026,24 @@ socket.on('_connected', () => {
 
 socket.on('_disconnected', () => {
   joinBtn.disabled = true;
-  queueStatus.textContent = 'Disconnected from server';
+  if (!lobby.classList.contains('hidden')) {
+    queueStatus.textContent = 'Reconnecting...';
+    queueStatus.style.color = '#f87171';
+  } else {
+    queueStatus.textContent = 'Disconnected from server';
+  }
   // Dismiss private lobby overlay on disconnect
   if (inPrivateLobby) {
     privateLobby.classList.add('hidden');
     inPrivateLobby = false;
     lobby.classList.remove('hidden');
   }
+});
+
+socket.on('_reconnect_failed', () => {
+  queueStatus.textContent = 'Connection lost. Refresh the page.';
+  queueStatus.style.color = '#f87171';
+  joinBtn.disabled = false;
 });
 
 // --- Touch device: toggle control info panels ---

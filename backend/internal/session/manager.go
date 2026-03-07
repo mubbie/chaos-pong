@@ -209,16 +209,17 @@ type bracketMatchInfo struct {
 }
 
 type tournamentStatePayload struct {
-	Code                string            `json:"code"`
-	State               int               `json:"state"`
-	Participants        []participantInfo `json:"participants"`
-	HostID              string            `json:"hostId"`
-	SemiFinal1          *bracketMatchInfo `json:"semiFinal1,omitempty"`
-	SemiFinal2          *bracketMatchInfo `json:"semiFinal2,omitempty"`
-	Final               *bracketMatchInfo `json:"finalMatch,omitempty"`
-	ChampionID          string            `json:"championId,omitempty"`
-	ChampionName        string            `json:"championName,omitempty"`
-	WaitingForContinue  bool              `json:"waitingForContinue,omitempty"`
+	Code               string            `json:"code"`
+	State              int               `json:"state"`
+	Participants       []participantInfo `json:"participants"`
+	HostID             string            `json:"hostId"`
+	SemiFinal1         *bracketMatchInfo `json:"semiFinal1,omitempty"`
+	SemiFinal2         *bracketMatchInfo `json:"semiFinal2,omitempty"`
+	Final              *bracketMatchInfo `json:"finalMatch,omitempty"`
+	ChampionID         string            `json:"championId,omitempty"`
+	ChampionName       string            `json:"championName,omitempty"`
+	WaitingForContinue bool              `json:"waitingForContinue,omitempty"`
+	ActiveRoomID       string            `json:"activeRoomId,omitempty"`
 }
 
 // --- Private Lobby payloads ---
@@ -1074,17 +1075,6 @@ func (m *Manager) createTournamentRoom(t *tournament.Tournament, p1, p2 tourname
 	}
 
 	onEnd := func(endRoomID, winnerID, winnerName string, p1Score, p2Score int, stats game.MatchStats) {
-		// Determine loser
-		var loserID, loserName string
-		if winnerID == p1.ClientID {
-			loserID, loserName = p2.ClientID, p2.Name
-		} else {
-			loserID, loserName = p1.ClientID, p1.Name
-		}
-
-		// Record result in tournament bracket
-		t.RecordMatchResult(winnerID, winnerName, loserID, loserName, p1Score, p2Score)
-
 		// Send game_end to players
 		endPayload := gameEndPayload{
 			WinnerID:   winnerID,
@@ -1117,6 +1107,22 @@ func (m *Manager) createTournamentRoom(t *tournament.Tournament, p1, p2 tourname
 		c2.SetRoomID("")
 		t.SetActiveRoomID("")
 		m.RemoveRoom(endRoomID)
+
+		// If tournament was cancelled/removed while match was in progress, skip tournament logic.
+		// Players will return to lobby via normal game-end flow since their tournamentID was cleared.
+		if m.tournamentMgr.Get(t.Code) == nil {
+			log.Printf("[tournament] match ended in room %s but tournament %s was already cancelled", endRoomID, t.Code)
+			return
+		}
+
+		// Determine loser and record result
+		var loserID, loserName string
+		if winnerID == p1.ClientID {
+			loserID, loserName = p2.ClientID, p2.Name
+		} else {
+			loserID, loserName = p1.ClientID, p1.Name
+		}
+		t.RecordMatchResult(winnerID, winnerName, loserID, loserName, p1Score, p2Score)
 
 		// Check if tournament is complete
 		if t.GetState() == tournament.StateComplete {
@@ -1204,63 +1210,69 @@ func (m *Manager) createTournamentRoom(t *tournament.Tournament, p1, p2 tourname
 		})
 	}
 
+	// Broadcast updated state so non-playing participants have activeRoomId
+	// and waitingForContinue=false (needed for "Watch Match" button on bracket)
+	m.broadcastTournamentState(t)
+
 	go room.Run()
 }
 
 func (m *Manager) buildTournamentState(t *tournament.Tournament) tournamentStatePayload {
-	participants := make([]participantInfo, 0)
-	for _, p := range t.Participants {
+	// Take a consistent snapshot under one lock to prevent data races
+	snap := t.Snapshot()
+
+	participants := make([]participantInfo, 0, len(snap.Participants))
+	for _, p := range snap.Participants {
 		participants = append(participants, participantInfo{ID: p.ClientID, Name: p.Name})
 	}
 
 	payload := tournamentStatePayload{
-		Code:               t.Code,
-		State:              int(t.GetState()),
+		Code:               snap.Code,
+		State:              int(snap.State),
 		Participants:       participants,
-		HostID:             t.GetHostID(),
-		WaitingForContinue: t.IsWaitingForContinue(),
+		HostID:             snap.HostID,
+		WaitingForContinue: snap.WaitingForContinue,
+		ActiveRoomID:       snap.ActiveRoomID,
 	}
 
-	// Build bracket info
-	state := t.GetState()
-	if state >= tournament.StateSemiFinal1 {
+	// Build bracket info from the snapshot
+	if snap.State >= tournament.StateSemiFinal1 {
 		payload.SemiFinal1 = &bracketMatchInfo{
-			Player1: &participantInfo{ID: t.Bracket.SemiFinal1[0].ClientID, Name: t.Bracket.SemiFinal1[0].Name},
-			Player2: &participantInfo{ID: t.Bracket.SemiFinal1[1].ClientID, Name: t.Bracket.SemiFinal1[1].Name},
+			Player1: &participantInfo{ID: snap.Bracket.SemiFinal1[0].ClientID, Name: snap.Bracket.SemiFinal1[0].Name},
+			Player2: &participantInfo{ID: snap.Bracket.SemiFinal1[1].ClientID, Name: snap.Bracket.SemiFinal1[1].Name},
 		}
-		if t.Bracket.SF1Result != nil {
-			payload.SemiFinal1.WinnerID = t.Bracket.SF1Result.WinnerID
-			payload.SemiFinal1.P1Score = t.Bracket.SF1Result.P1Score
-			payload.SemiFinal1.P2Score = t.Bracket.SF1Result.P2Score
+		if snap.Bracket.SF1Result != nil {
+			payload.SemiFinal1.WinnerID = snap.Bracket.SF1Result.WinnerID
+			payload.SemiFinal1.P1Score = snap.Bracket.SF1Result.P1Score
+			payload.SemiFinal1.P2Score = snap.Bracket.SF1Result.P2Score
 		}
 
 		payload.SemiFinal2 = &bracketMatchInfo{
-			Player1: &participantInfo{ID: t.Bracket.SemiFinal2[0].ClientID, Name: t.Bracket.SemiFinal2[0].Name},
-			Player2: &participantInfo{ID: t.Bracket.SemiFinal2[1].ClientID, Name: t.Bracket.SemiFinal2[1].Name},
+			Player1: &participantInfo{ID: snap.Bracket.SemiFinal2[0].ClientID, Name: snap.Bracket.SemiFinal2[0].Name},
+			Player2: &participantInfo{ID: snap.Bracket.SemiFinal2[1].ClientID, Name: snap.Bracket.SemiFinal2[1].Name},
 		}
-		if t.Bracket.SF2Result != nil {
-			payload.SemiFinal2.WinnerID = t.Bracket.SF2Result.WinnerID
-			payload.SemiFinal2.P1Score = t.Bracket.SF2Result.P1Score
-			payload.SemiFinal2.P2Score = t.Bracket.SF2Result.P2Score
+		if snap.Bracket.SF2Result != nil {
+			payload.SemiFinal2.WinnerID = snap.Bracket.SF2Result.WinnerID
+			payload.SemiFinal2.P1Score = snap.Bracket.SF2Result.P1Score
+			payload.SemiFinal2.P2Score = snap.Bracket.SF2Result.P2Score
 		}
 	}
 
-	if state >= tournament.StateFinal && t.Bracket.FinalPair[0].ClientID != "" {
+	if snap.State >= tournament.StateFinal && snap.Bracket.FinalPair[0].ClientID != "" {
 		payload.Final = &bracketMatchInfo{
-			Player1: &participantInfo{ID: t.Bracket.FinalPair[0].ClientID, Name: t.Bracket.FinalPair[0].Name},
-			Player2: &participantInfo{ID: t.Bracket.FinalPair[1].ClientID, Name: t.Bracket.FinalPair[1].Name},
+			Player1: &participantInfo{ID: snap.Bracket.FinalPair[0].ClientID, Name: snap.Bracket.FinalPair[0].Name},
+			Player2: &participantInfo{ID: snap.Bracket.FinalPair[1].ClientID, Name: snap.Bracket.FinalPair[1].Name},
 		}
-		if t.Bracket.FinalResult != nil {
-			payload.Final.WinnerID = t.Bracket.FinalResult.WinnerID
-			payload.Final.P1Score = t.Bracket.FinalResult.P1Score
-			payload.Final.P2Score = t.Bracket.FinalResult.P2Score
+		if snap.Bracket.FinalResult != nil {
+			payload.Final.WinnerID = snap.Bracket.FinalResult.WinnerID
+			payload.Final.P1Score = snap.Bracket.FinalResult.P1Score
+			payload.Final.P2Score = snap.Bracket.FinalResult.P2Score
 		}
 	}
 
-	if state == tournament.StateComplete {
-		champID, champName := t.GetChampion()
-		payload.ChampionID = champID
-		payload.ChampionName = champName
+	if snap.State == tournament.StateComplete {
+		payload.ChampionID = snap.ChampionID
+		payload.ChampionName = snap.ChampionName
 	}
 
 	return payload
@@ -1268,14 +1280,17 @@ func (m *Manager) buildTournamentState(t *tournament.Tournament) tournamentState
 
 func (m *Manager) broadcastTournamentState(t *tournament.Tournament) {
 	state := m.buildTournamentState(t)
-	for _, p := range t.Participants {
+	// Use thread-safe copy of participants to avoid holding lock during I/O
+	for _, p := range t.GetParticipantsCopy() {
 		if c := m.hub.GetClient(p.ClientID); c != nil {
 			c.SendMessage("tournament_state", state)
 		}
 	}
 }
 
-// handleLeaveTournament allows a player to voluntarily leave a tournament lobby.
+// handleLeaveTournament allows a player to voluntarily leave a tournament.
+// In lobby state: normal leave/rejoin. After start: immediately cancels the
+// entire tournament for everyone, force-stopping any active match.
 func (m *Manager) handleLeaveTournament(client *ws.Client) {
 	code := client.GetTournamentID()
 	if code == "" {
@@ -1288,15 +1303,78 @@ func (m *Manager) handleLeaveTournament(client *ws.Client) {
 		return
 	}
 
-	// Only allow leaving from lobby state
-	if t.GetState() != tournament.StateLobby {
-		client.SendMessage("error", errorPayload{
-			Code:    "TOURNAMENT_IN_PROGRESS",
-			Message: "Cannot leave a tournament in progress.",
-		})
+	state := t.GetState()
+
+	// --- After tournament has started: immediate cancel for everyone ---
+	if state != tournament.StateLobby && state != tournament.StateComplete {
+		log.Printf("[tournament] %s cancelled: %s left (state=%d)", code, client.ID, state)
+
+		// Force-stop any active match
+		activeRoom := t.GetActiveRoomID()
+		if activeRoom != "" {
+			m.mu.RLock()
+			room, roomExists := m.rooms[activeRoom]
+			m.mu.RUnlock()
+
+			if roomExists {
+				room.Stop()
+
+				// Send game_end (forfeit) to both players in the match
+				p1ID, p2ID := room.GetPlayerIDs()
+				for _, pid := range []string{p1ID, p2ID} {
+					if pc := m.hub.GetClient(pid); pc != nil {
+						pc.SendMessage("game_end", gameEndPayload{
+							WinnerID:   "",
+							WinnerName: "",
+							FinalScore: finalScore{},
+							RoomID:     activeRoom,
+							IsForfeit:  true,
+						})
+						pc.SetRoomID("")
+					}
+				}
+
+				// Notify spectators
+				m.specMu.Lock()
+				for _, spec := range m.spectators[activeRoom] {
+					spec.SendMessage("game_end", gameEndPayload{
+						WinnerID:    "",
+						WinnerName:  "",
+						FinalScore:  finalScore{},
+						RoomID:      activeRoom,
+						IsSpectator: true,
+						IsForfeit:   true,
+					})
+					spec.SetRoomID("")
+				}
+				delete(m.spectators, activeRoom)
+				m.specMu.Unlock()
+
+				t.SetActiveRoomID("")
+				m.RemoveRoom(activeRoom)
+			}
+		}
+
+		// Clear the leaving player's tournament ID
+		client.SetTournamentID("")
+		t.RemoveParticipant(client.ID)
+
+		// Notify ALL remaining participants that the tournament is cancelled
+		for _, p := range t.GetParticipantsCopy() {
+			if c := m.hub.GetClient(p.ClientID); c != nil {
+				c.SendMessage("tournament_cancelled", map[string]string{
+					"reason": "A player left the tournament.",
+				})
+				c.SetTournamentID("")
+			}
+		}
+
+		m.tournamentMgr.Remove(code)
+		log.Printf("[tournament] %s removed (player left)", code)
 		return
 	}
 
+	// --- Lobby state or Complete state: normal leave ---
 	wasHost := t.IsHost(client.ID)
 	t.RemoveParticipant(client.ID)
 	client.SetTournamentID("")
@@ -1350,7 +1428,7 @@ func (m *Manager) handleTournamentMatchEnd(tournCode, winnerID, winnerName, lose
 
 // clearTournamentIDs clears the TournamentID for all connected participants in a tournament.
 func (m *Manager) clearTournamentIDs(t *tournament.Tournament) {
-	for _, p := range t.Participants {
+	for _, p := range t.GetParticipantsCopy() {
 		if c := m.hub.GetClient(p.ClientID); c != nil {
 			c.SetTournamentID("")
 		}
@@ -1491,7 +1569,12 @@ func (m *Manager) HandleDisconnect(clientID string) {
 	// Stop the game and declare the other player the winner
 	foundRoom.Stop()
 
-	winnerID, winnerName, p1Score, p2Score, stats := foundRoom.GetForfeitResult(clientID)
+	winnerID, winnerName, p1Score, p2Score, stats, alreadyFinished := foundRoom.GetForfeitResult(clientID)
+
+	if alreadyFinished {
+		log.Printf("[manager] room %s was already finished, skipping forfeit logic", foundRoomID)
+		return
+	}
 
 	// Get disconnected player's name for tournament result recording
 	var loserName string
@@ -1571,7 +1654,12 @@ func (m *Manager) handleLeaveMatch(client *ws.Client) {
 	// Stop the game and declare the other player the winner
 	foundRoom.Stop()
 
-	winnerID, winnerName, p1Score, p2Score, stats := foundRoom.GetForfeitResult(clientID)
+	winnerID, winnerName, p1Score, p2Score, stats, alreadyFinished := foundRoom.GetForfeitResult(clientID)
+
+	if alreadyFinished {
+		log.Printf("[manager] room %s was already finished, skipping leave match forfeit logic", foundRoomID)
+		return
+	}
 
 	// Notify the remaining player
 	winner := m.hub.GetClient(winnerID)

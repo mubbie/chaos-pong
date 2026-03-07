@@ -497,6 +497,26 @@ export class GameScene extends Phaser.Scene {
     };
     socket.on('spectator_reaction', this.onSpectatorReaction);
 
+    // Ensure socket handlers are cleaned up when the Phaser game is destroyed externally
+    // (e.g. phaserGame.destroy(true) from main.ts). Phaser's game.destroy() emits the
+    // DESTROY event, NOT SHUTDOWN, so the shutdown() lifecycle method won't fire.
+    this.events.on('destroy', () => {
+      this.sceneActive = false;
+      socket.off('game_state', this.onGameState);
+      socket.off('game_end', this.onGameEnd);
+      socket.off('taunt', this.onTaunt);
+      socket.off('spectator_reaction', this.onSpectatorReaction);
+      // Clean up taunt/reaction key listeners to prevent leaks
+      for (const key of this.tauntKeys) {
+        key.removeAllListeners();
+      }
+      this.tauntKeys = [];
+      // Close audio context
+      if (this.audio) {
+        this.audio.destroy();
+      }
+    });
+
     // Spectator-specific listeners
     if (this.isSpectator) {
       const onSpectatorInfo = (info: { player1Name: string; player2Name: string; p1Score: number; p2Score: number }) => {
@@ -506,10 +526,10 @@ export class GameScene extends Phaser.Scene {
         this.p2ScoreText.setText(info.p2Score.toString());
       };
       socket.on('spectator_info', onSpectatorInfo);
-      // Clean up
-      this.events.on('shutdown', () => {
-        socket.off('spectator_info', onSpectatorInfo);
-      });
+      // Clean up on both shutdown and destroy
+      const cleanupSpectatorInfo = () => socket.off('spectator_info', onSpectatorInfo);
+      this.events.on('shutdown', cleanupSpectatorInfo);
+      this.events.on('destroy', cleanupSpectatorInfo);
     }
 
     // Spectator overlay
@@ -633,7 +653,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // --- Ball extrapolation between server ticks ---
-    if (!gamePaused && this.ballVx !== 0 || this.ballVy !== 0) {
+    if (!gamePaused && (this.ballVx !== 0 || this.ballVy !== 0)) {
       let bx = this.ball.x + this.ballVx * dt;
       let by = this.ball.y + this.ballVy * dt;
 
@@ -697,20 +717,20 @@ export class GameScene extends Phaser.Scene {
 
     if (this.prevState) {
       if (state.player1.score !== this.prevState.player1.score ||
-          state.player2.score !== this.prevState.player2.score) {
+        state.player2.score !== this.prevState.player2.score) {
         scored = true;
       }
 
       if (!scored) {
         if (this.prevState.ball.vx !== 0 &&
-            Math.sign(state.ball.vx) !== Math.sign(this.prevState.ball.vx)) {
+          Math.sign(state.ball.vx) !== Math.sign(this.prevState.ball.vx)) {
           // Ball's horizontal velocity flipped — could be a paddle hit or a shield bounce.
           // Distinguish by checking if an active shield is on the bounce side
           // and if the ball is closer to the shield than to the paddle.
           if (state.shield?.active) {
             const hitLeft = state.ball.vx > 0; // bounced on left side
             const shieldOnSameSide = (hitLeft && state.shield.side === 0) ||
-                                     (!hitLeft && state.shield.side === 1);
+              (!hitLeft && state.shield.side === 1);
             if (shieldOnSameSide) {
               const paddleX = hitLeft ? 30 : arena.width - 30;
               const distToShield = Math.abs(state.ball.x - state.shield.x);
@@ -728,13 +748,13 @@ export class GameScene extends Phaser.Scene {
           }
         }
         if (this.prevState.ball.vy !== 0 &&
-            Math.sign(state.ball.vy) !== Math.sign(this.prevState.ball.vy)) {
+          Math.sign(state.ball.vy) !== Math.sign(this.prevState.ball.vy)) {
           wallBounce = true;
         }
       }
 
       if (this.prevState.status === GameStatus.Countdown &&
-          state.status === GameStatus.Playing) {
+        state.status === GameStatus.Playing) {
         transitionToPlaying = true;
       }
     }

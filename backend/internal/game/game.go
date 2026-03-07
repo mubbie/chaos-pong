@@ -29,12 +29,12 @@ type MatchStats struct {
 
 // GameRoom is one active game between two players.
 type GameRoom struct {
-	ID       string
-	Player1  *Player
-	Player2  *Player
-	Ball     Ball
-	Status   GameStatus
-	Tick     uint64
+	ID         string
+	Player1    *Player
+	Player2    *Player
+	Ball       Ball
+	Status     GameStatus
+	Tick       uint64
 	PowerUps   *powerup.Manager
 	ExtraBalls []Ball
 
@@ -43,6 +43,8 @@ type GameRoom struct {
 
 	mu        sync.Mutex
 	done      chan struct{}
+	stopped   bool // true once Stop() is called — prevents onEnd from firing
+	ended     bool // true once onEnd fires — prevents double-processing
 	broadcast func(state GameState)
 	onScore   ScoreCallback
 	onEnd     GameEndCallback
@@ -327,6 +329,13 @@ func (r *GameRoom) checkWin() bool {
 
 	r.Status = StatusFinished
 
+	// If Stop() was already called (e.g. tournament cancel or forfeit),
+	// don't fire onEnd — the caller of Stop() handles cleanup instead.
+	if r.stopped {
+		return true
+	}
+	r.ended = true
+
 	var winner *Player
 	if p1 > p2 {
 		winner = r.Player1
@@ -562,13 +571,25 @@ func (r *GameRoom) IsPaused() bool {
 	return r.Paused
 }
 
-// Stop signals the game loop to exit.
-func (r *GameRoom) Stop() {
+// Stop signals the game loop to exit and prevents onEnd from firing.
+// Returns true if this call actually stopped the game, false if it was
+// already stopped or had already ended naturally.
+func (r *GameRoom) Stop() bool {
+	r.mu.Lock()
+	if r.stopped || r.ended {
+		r.mu.Unlock()
+		return false
+	}
+	r.stopped = true
+	r.mu.Unlock()
+
 	select {
 	case <-r.done:
 		// Already closed
+		return false
 	default:
 		close(r.done)
+		return true
 	}
 }
 
@@ -583,18 +604,25 @@ func (r *GameRoom) GetPlayerIDs() (string, string) {
 }
 
 // GetForfeitResult returns the winner info when a player disconnects.
-func (r *GameRoom) GetForfeitResult(disconnectedID string) (winnerID, winnerName string, p1Score, p2Score int, stats MatchStats) {
+// Returns alreadyFinished=true if the game naturally ended just before the forfeit.
+func (r *GameRoom) GetForfeitResult(disconnectedID string) (winnerID, winnerName string, p1Score, p2Score int, stats MatchStats, alreadyFinished bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if r.Status == StatusFinished || r.ended {
+		return "", "", 0, 0, r.Stats, true
+	}
+	r.Status = StatusFinished
+	r.stopped = true // Prevent onEnd from also firing
 
 	p1Score = r.Player1.Score
 	p2Score = r.Player2.Score
 	stats = r.Stats
 
 	if r.Player1.ID == disconnectedID {
-		return r.Player2.ID, r.Player2.Name, p1Score, p2Score, stats
+		return r.Player2.ID, r.Player2.Name, p1Score, p2Score, stats, false
 	}
-	return r.Player1.ID, r.Player1.Name, p1Score, p2Score, stats
+	return r.Player1.ID, r.Player1.Name, p1Score, p2Score, stats, false
 }
 
 // opposite returns the other side.

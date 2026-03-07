@@ -42,10 +42,11 @@ COPY --from=backend /chaos-pong ./chaos-pong
 COPY --from=frontend /build/client/dist ./client/dist
 
 # Default env — override at deploy time
+# IMPORTANT: Set ALLOWED_ORIGINS to your actual domain(s) before deploying!
+# Example: ALLOWED_ORIGINS=https://chaos-pong.example.com
 ENV ENV=production \
     PORT=8080 \
-    STATIC_DIR=./client/dist \
-    ALLOWED_ORIGINS=*
+    STATIC_DIR=./client/dist
 
 EXPOSE 8080
 
