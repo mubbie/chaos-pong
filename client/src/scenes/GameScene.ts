@@ -18,6 +18,10 @@ export function setOnPauseChanged(cb: (paused: boolean) => void): void {
 
 const COUNTDOWN_TICKS = 180; // 3 seconds * 60 ticks/sec
 
+// Must match server constants for client-side prediction
+const PADDLE_SPEED = 400; // pixels per second (same as backend PaddleSpeed)
+const ARENA_HEIGHT = 600; // same as backend ArenaHeight
+
 // Neon color palette
 const P1_COLOR = 0x00f5ff; // cyan
 const P2_COLOR = 0xff00e5; // magenta
@@ -152,6 +156,23 @@ export class GameScene extends Phaser.Scene {
   private leftPaddleHeight: number = 100;
   private rightPaddleHeight: number = 100;
 
+  // Client-side prediction
+  private predictedY: number = 0;     // local player's predicted paddle Y
+  private myPaddleHeight: number = 100;
+  private myFrozen: boolean = false;
+  private myReversed: boolean = false;
+  private lastFrameTime: number = 0;
+
+  // Ball extrapolation between server ticks
+  private ballVx: number = 0;
+  private ballVy: number = 0;
+  private ballServerX: number = 0;
+  private ballServerY: number = 0;
+
+  // Opponent paddle smoothing
+  private opponentServerY: number = 0;
+  private opponentDisplayY: number = 0;
+
   // Bound callbacks
   private onGameState!: (payload: GameStatePayload) => void;
   private onGameEnd!: (payload: GameEndPayload) => void;
@@ -269,6 +290,10 @@ export class GameScene extends Phaser.Scene {
     this.rightPaddleGfx = this.add.graphics().setDepth(5);
     this.leftPaddleY = arena.height / 2;
     this.rightPaddleY = arena.height / 2;
+    this.predictedY = arena.height / 2;
+    this.opponentServerY = arena.height / 2;
+    this.opponentDisplayY = arena.height / 2;
+    this.lastFrameTime = performance.now();
     this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR);
     this.drawPaddle(this.rightPaddleGfx, arena.width - 30, this.rightPaddleY, P2_COLOR);
 
@@ -491,6 +516,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
+    const now = performance.now();
+    const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05); // cap at 50ms
+    this.lastFrameTime = now;
+
     // Check if the game is paused (server-authoritative or local overlay for spectators)
     const pauseOverlay = document.getElementById('pause-menu');
     const overlayVisible = pauseOverlay != null && !pauseOverlay.classList.contains('hidden');
@@ -514,6 +543,63 @@ export class GameScene extends Phaser.Scene {
         if (direction !== this.lastDirection) {
           this.lastDirection = direction;
           SocketManager.getInstance().send('player_input', { direction });
+        }
+
+        // --- Client-side paddle prediction ---
+        if (!this.myFrozen) {
+          let predictedDir = direction;
+          if (this.myReversed) predictedDir = -predictedDir;
+
+          this.predictedY += predictedDir * PADDLE_SPEED * dt;
+
+          // Clamp to arena bounds (matching server logic)
+          const halfH = this.myPaddleHeight / 2;
+          if (this.predictedY - halfH < 0) this.predictedY = halfH;
+          if (this.predictedY + halfH > ARENA_HEIGHT) this.predictedY = ARENA_HEIGHT - halfH;
+        }
+
+        // Apply predicted position to the local paddle and redraw
+        const { arena } = this.gameData;
+        const isLeft = this.gameData.you.side === 'left';
+        if (isLeft) {
+          this.leftPaddleY = this.predictedY;
+          this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+          this.drawPaddleGlow(this.leftPaddleGlow, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+        } else {
+          this.rightPaddleY = this.predictedY;
+          this.drawPaddle(this.rightPaddleGfx, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
+          this.drawPaddleGlow(this.rightPaddleGlow, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
+        }
+      }
+    }
+
+    // --- Ball extrapolation between server ticks ---
+    if (!gamePaused && this.ballVx !== 0 || this.ballVy !== 0) {
+      let bx = this.ball.x + this.ballVx * dt;
+      let by = this.ball.y + this.ballVy * dt;
+
+      // Bounce off top/bottom walls (like server does)
+      if (by < 0) { by = -by; }
+      if (by > ARENA_HEIGHT) { by = 2 * ARENA_HEIGHT - by; }
+
+      this.ball.setPosition(bx, by);
+    }
+
+    // --- Opponent paddle smoothing ---
+    if (this.prevState) {
+      const diff = this.opponentServerY - this.opponentDisplayY;
+      if (Math.abs(diff) > 1) {
+        this.opponentDisplayY += diff * 0.35;
+        const { arena } = this.gameData;
+        const isLeft = !this.isSpectator && this.gameData.you.side === 'left';
+        if (isLeft) {
+          this.rightPaddleY = this.opponentDisplayY;
+          this.drawPaddle(this.rightPaddleGfx, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
+          this.drawPaddleGlow(this.rightPaddleGlow, arena.width - 30, this.rightPaddleY, P2_COLOR, this.rightPaddleHeight);
+        } else if (!this.isSpectator) {
+          this.leftPaddleY = this.opponentDisplayY;
+          this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
+          this.drawPaddleGlow(this.leftPaddleGlow, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
         }
       }
     }
@@ -599,11 +685,67 @@ export class GameScene extends Phaser.Scene {
       paddleHit = true;
     }
 
-    // --- Position Updates ---
-    this.leftPaddleY = state.player1.paddleY;
-    this.rightPaddleY = state.player2.paddleY;
+    // --- Position Updates (with client-side prediction reconciliation) ---
     this.leftPaddleHeight = state.player1.paddleHeight || 100;
     this.rightPaddleHeight = state.player2.paddleHeight || 100;
+
+    const isLeft = !this.isSpectator && this.gameData.you.side === 'left';
+    const isRight = !this.isSpectator && this.gameData.you.side === 'right';
+
+    // Sync prediction state from server effects
+    if (isLeft) {
+      this.myFrozen = state.player1Effects?.frozen ?? false;
+      this.myReversed = state.player1Effects?.reversed ?? false;
+      this.myPaddleHeight = this.leftPaddleHeight;
+    } else if (isRight) {
+      this.myFrozen = state.player2Effects?.frozen ?? false;
+      this.myReversed = state.player2Effects?.reversed ?? false;
+      this.myPaddleHeight = this.rightPaddleHeight;
+    }
+
+    // Reconcile local prediction with server authority
+    if (isLeft) {
+      const serverY = state.player1.paddleY;
+      const error = Math.abs(this.predictedY - serverY);
+      // Snap if error is large (e.g. teleport/reset), otherwise nudge toward server
+      if (error > 30) {
+        this.predictedY = serverY;
+      } else if (error > 1) {
+        this.predictedY += (serverY - this.predictedY) * 0.3;
+      }
+      this.leftPaddleY = this.predictedY;
+      // Opponent paddle: set target for smoothing in update()
+      this.opponentServerY = state.player2.paddleY;
+      if (Math.abs(this.opponentServerY - this.opponentDisplayY) > 50) {
+        this.opponentDisplayY = this.opponentServerY; // snap on large jump
+      }
+      this.rightPaddleY = this.opponentDisplayY;
+    } else if (isRight) {
+      const serverY = state.player2.paddleY;
+      const error = Math.abs(this.predictedY - serverY);
+      if (error > 30) {
+        this.predictedY = serverY;
+      } else if (error > 1) {
+        this.predictedY += (serverY - this.predictedY) * 0.3;
+      }
+      this.rightPaddleY = this.predictedY;
+      // Opponent paddle: set target for smoothing in update()
+      this.opponentServerY = state.player1.paddleY;
+      if (Math.abs(this.opponentServerY - this.opponentDisplayY) > 50) {
+        this.opponentDisplayY = this.opponentServerY;
+      }
+      this.leftPaddleY = this.opponentDisplayY;
+    } else {
+      // Spectator: both paddles from server
+      this.leftPaddleY = state.player1.paddleY;
+      this.rightPaddleY = state.player2.paddleY;
+    }
+
+    // --- Ball: snap to server position and store velocity for extrapolation ---
+    this.ballVx = state.ball.vx;
+    this.ballVy = state.ball.vy;
+    this.ballServerX = state.ball.x;
+    this.ballServerY = state.ball.y;
     this.ball.setPosition(state.ball.x, state.ball.y);
 
     this.drawPaddle(this.leftPaddleGfx, 30, this.leftPaddleY, P1_COLOR, this.leftPaddleHeight);
@@ -1255,7 +1397,7 @@ export class GameScene extends Phaser.Scene {
     const speedFactor = Math.max((speed - 300) / 300, 0);
     const rallyFactor = Math.min(this.rallyCount / 10, 1);
     const streakFactor = Math.min(this.scoringStreak / 3, 1);
-    const target = Math.min(speedFactor * 0.3 + rallyFactor * 0.2 + streakFactor * 0.1, 0.5);
+    const target = Math.min(speedFactor * 0.3 + rallyFactor * 0.2 + streakFactor * 0.1, 0.35);
 
     // Smooth lerp toward target
     this.bgIntensity += (target - this.bgIntensity) * 0.05;
@@ -1329,10 +1471,15 @@ export class GameScene extends Phaser.Scene {
 
   private drawPaddleGlow(gfx: Phaser.GameObjects.Graphics, x: number, y: number, color: number, height: number = 100): void {
     gfx.clear();
-    gfx.fillStyle(color, 0.08);
+    // Bright edge outline so paddle is always visible during chaos
+    gfx.lineStyle(1.5, color, 0.5);
+    gfx.strokeRoundedRect(x - 8.5, y - height / 2 - 1, 17, height + 2, 5);
+    // Inner glow
+    gfx.fillStyle(color, 0.15);
     gfx.fillRoundedRect(x - 12, y - height / 2 - 5, 24, height + 10, 6);
-    gfx.fillStyle(color, 0.04);
-    gfx.fillRoundedRect(x - 16, y - height / 2 - 10, 32, height + 20, 8);
+    // Outer glow
+    gfx.fillStyle(color, 0.08);
+    gfx.fillRoundedRect(x - 18, y - height / 2 - 10, 36, height + 20, 8);
   }
 
   private drawBallGlow(x: number, y: number, color: number, radius: number = 8): void {
@@ -1589,18 +1736,20 @@ export class GameScene extends Phaser.Scene {
       this.powerUpGfx.strokeCircle(pu.x, bobY, this.powerUpSpawnRingRadius);
     }
 
-    // Pulsing glow ring (scaled)
+    // Pulsing glow ring (scaled) — large orb for easy pickup
     const pulseAlpha = 0.15 + Math.sin(this.powerUpBobOffset * 1.5) * 0.1;
+    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.3 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 44 * scale);
     this.powerUpGfx.fillStyle(puColor, pulseAlpha * scale);
-    this.powerUpGfx.fillCircle(pu.x, bobY, 22 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 32 * scale);
     this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.5 * scale);
-    this.powerUpGfx.fillCircle(pu.x, bobY, 30 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 40 * scale);
 
-    // Inner icon shape (scaled using canvas transform)
+    // Inner icon shape (scaled using canvas transform) — 1.5x icon size
     if (scale > 0.1) {
       this.powerUpGfx.save();
       this.powerUpGfx.translateCanvas(pu.x, bobY);
-      this.powerUpGfx.scaleCanvas(scale, scale);
+      this.powerUpGfx.scaleCanvas(scale * 1.5, scale * 1.5);
       this.powerUpGfx.translateCanvas(-pu.x, -bobY);
       this.powerUpGfx.fillStyle(puColor, 0.8);
       this.drawPowerUpIcon(pu.x, bobY, pu.type);
@@ -1608,7 +1757,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     // Label (fades in with scale)
-    this.powerUpLabel.setPosition(pu.x, bobY + 28);
+    this.powerUpLabel.setPosition(pu.x, bobY + 38);
     this.powerUpLabel.setText(puName);
     this.powerUpLabel.setColor('#' + puColor.toString(16).padStart(6, '0'));
     this.powerUpLabel.setAlpha(scale);

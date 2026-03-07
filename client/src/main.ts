@@ -74,13 +74,41 @@ let continueSent = false;
 const socket = SocketManager.getInstance();
 socket.connect();
 
+// --- Connection status ---
+socket.on('_connected', () => {
+  queueStatus.textContent = '';
+  // Re-enable join button when reconnected (if lobby is visible)
+  if (!lobby.classList.contains('hidden') && joinBtn.disabled) {
+    joinBtn.disabled = false;
+  }
+});
+
+socket.on('_disconnected', () => {
+  if (!lobby.classList.contains('hidden')) {
+    queueStatus.textContent = 'Reconnecting...';
+    queueStatus.style.color = '#f87171'; // red-400
+  }
+});
+
+socket.on('_reconnect_failed', () => {
+  queueStatus.textContent = 'Connection lost. Refresh the page.';
+  queueStatus.style.color = '#f87171';
+  joinBtn.disabled = false;
+});
+
 // --- Lobby logic ---
 joinBtn.addEventListener('click', () => {
   playerName = nameInput.value.trim() || 'Player';
   nameInput.value = playerName;
-  socket.send('join_queue', { name: playerName });
-  joinBtn.disabled = true;
-  queueStatus.textContent = 'Searching for opponent...';
+  const sent = socket.send('join_queue', { name: playerName });
+  if (sent) {
+    joinBtn.disabled = true;
+    queueStatus.textContent = 'Searching for opponent...';
+    queueStatus.style.color = '';
+  } else {
+    queueStatus.textContent = 'Not connected. Retrying...';
+    queueStatus.style.color = '#f87171';
+  }
 });
 
 // Allow Enter key to join

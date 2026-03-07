@@ -2,6 +2,11 @@ import type { Envelope, ClientMessageType } from '../types/messages';
 
 type MessageCallback = (payload: any) => void;
 
+// Reconnection config
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_MS = 5000;
+const RECONNECT_MAX_ATTEMPTS = 20;
+
 export class SocketManager {
   private static instance: SocketManager;
   private ws: WebSocket | null = null;
@@ -9,6 +14,9 @@ export class SocketManager {
   private _myId: string = '';
   private _myName: string = '';
   private _connected: boolean = false;
+  private reconnectAttempts: number = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private intentionalClose: boolean = false;
 
   private constructor() {}
 
@@ -21,20 +29,40 @@ export class SocketManager {
 
   connect(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    this.intentionalClose = false;
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
     this.ws.onopen = () => {
       this._connected = true;
+      this.reconnectAttempts = 0;
       console.log('[socket] connected');
       this.dispatch('_connected', {});
     };
 
     this.ws.onclose = () => {
+      const wasConnected = this._connected;
       this._connected = false;
       console.log('[socket] disconnected');
       this.dispatch('_disconnected', {});
+
+      // Auto-reconnect unless intentionally closed
+      if (!this.intentionalClose && this.reconnectAttempts < RECONNECT_MAX_ATTEMPTS) {
+        const delay = Math.min(
+          RECONNECT_BASE_MS * Math.pow(1.5, this.reconnectAttempts),
+          RECONNECT_MAX_MS
+        );
+        this.reconnectAttempts++;
+        console.log(`[socket] reconnecting in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts})`);
+        this.reconnectTimer = setTimeout(() => {
+          this.ws = null;
+          this.connect();
+        }, delay);
+      } else if (this.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+        console.error('[socket] max reconnect attempts reached');
+        this.dispatch('_reconnect_failed', {});
+      }
     };
 
     this.ws.onerror = (err) => {
@@ -52,6 +80,11 @@ export class SocketManager {
   }
 
   disconnect(): void {
+    this.intentionalClose = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -62,13 +95,14 @@ export class SocketManager {
     return this._connected;
   }
 
-  send<T>(type: ClientMessageType, payload: T): void {
+  send<T>(type: ClientMessageType, payload: T): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn('[socket] not connected, dropping message:', type);
-      return;
+      return false;
     }
     const envelope: Envelope<T> = { type, payload };
     this.ws.send(JSON.stringify(envelope));
+    return true;
   }
 
   on(type: string, callback: MessageCallback): void {
