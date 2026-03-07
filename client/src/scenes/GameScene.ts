@@ -1754,28 +1754,28 @@ export class GameScene extends Phaser.Scene {
       this.powerUpGfx.strokeCircle(pu.x, bobY, this.powerUpSpawnRingRadius);
     }
 
-    // Pulsing glow ring (scaled) — large orb for easy pickup
+    // Pulsing glow ring (scaled) — extra-large orb for easy pickup
     const pulseAlpha = 0.15 + Math.sin(this.powerUpBobOffset * 1.5) * 0.1;
-    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.3 * scale);
-    this.powerUpGfx.fillCircle(pu.x, bobY, 44 * scale);
+    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.2 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 60 * scale);
+    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.4 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 48 * scale);
     this.powerUpGfx.fillStyle(puColor, pulseAlpha * scale);
-    this.powerUpGfx.fillCircle(pu.x, bobY, 32 * scale);
-    this.powerUpGfx.fillStyle(puColor, pulseAlpha * 0.5 * scale);
-    this.powerUpGfx.fillCircle(pu.x, bobY, 40 * scale);
+    this.powerUpGfx.fillCircle(pu.x, bobY, 36 * scale);
 
-    // Inner icon shape (scaled using canvas transform) — 1.5x icon size
+    // Inner icon shape (scaled using canvas transform) — 2x icon size
     if (scale > 0.1) {
       this.powerUpGfx.save();
       this.powerUpGfx.translateCanvas(pu.x, bobY);
-      this.powerUpGfx.scaleCanvas(scale * 1.5, scale * 1.5);
+      this.powerUpGfx.scaleCanvas(scale * 2, scale * 2);
       this.powerUpGfx.translateCanvas(-pu.x, -bobY);
-      this.powerUpGfx.fillStyle(puColor, 0.8);
+      this.powerUpGfx.fillStyle(puColor, 0.85);
       this.drawPowerUpIcon(pu.x, bobY, pu.type);
       this.powerUpGfx.restore();
     }
 
     // Label (fades in with scale)
-    this.powerUpLabel.setPosition(pu.x, bobY + 38);
+    this.powerUpLabel.setPosition(pu.x, bobY + 46);
     this.powerUpLabel.setText(puName);
     this.powerUpLabel.setColor('#' + puColor.toString(16).padStart(6, '0'));
     this.powerUpLabel.setAlpha(scale);
