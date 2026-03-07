@@ -1,1 +1,16 @@
 @import "tailwindcss";
+
+/* Prevent mobile browser scroll/bounce during gameplay */
+#game-container canvas {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Prevent pull-to-refresh when game is active */
+#game-container:not(.hidden) {
+  overscroll-behavior: none;
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
+}

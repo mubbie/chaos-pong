@@ -333,6 +333,13 @@ socket.on('game_start', (payload: GameStartPayload) => {
     parent: 'game-container',
     backgroundColor: '#0a0a2e',
     scene: [GameScene, GameOverScene],
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+    },
+    input: {
+      touch: true,
+    },
   });
 
   // Pass game start data to the first scene (include isSpectator and isTournament)

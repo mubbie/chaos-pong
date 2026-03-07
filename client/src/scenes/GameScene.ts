@@ -174,6 +174,10 @@ export class GameScene extends Phaser.Scene {
   private opponentServerY: number = 0;
   private opponentDisplayY: number = 0;
 
+  // Touch input (mobile)
+  private touchActive: boolean = false;
+  private touchTargetY: number = 0;
+
   // Bound callbacks
   private onGameState!: (payload: GameStatePayload) => void;
   private onGameEnd!: (payload: GameEndPayload) => void;
@@ -425,6 +429,20 @@ export class GameScene extends Phaser.Scene {
     this.wKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W);
     this.sKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
+    // --- Touch input (mobile) ---
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (this.isSpectator) return;
+      this.touchActive = true;
+      this.touchTargetY = pointer.y;
+    });
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      if (!this.touchActive || this.isSpectator) return;
+      this.touchTargetY = pointer.y;
+    });
+    this.input.on('pointerup', () => {
+      this.touchActive = false;
+    });
+
     // Helper: check if pause menu is open (shared by taunt key handlers)
     const isPauseMenuOpen = () => {
       const overlay = document.getElementById('pause-menu');
@@ -558,6 +576,14 @@ export class GameScene extends Phaser.Scene {
         if (up && !down) direction = -1;
         else if (down && !up) direction = 1;
 
+        // Touch input: derive direction from finger position vs paddle
+        if (this.touchActive && direction === 0) {
+          const deadzone = 8; // pixels of tolerance
+          const diff = this.touchTargetY - this.predictedY;
+          if (diff < -deadzone) direction = -1;
+          else if (diff > deadzone) direction = 1;
+        }
+
         if (direction !== this.lastDirection) {
           this.lastDirection = direction;
           SocketManager.getInstance().send('player_input', { direction });
@@ -565,10 +591,25 @@ export class GameScene extends Phaser.Scene {
 
         // --- Client-side paddle prediction ---
         if (!this.myFrozen) {
-          let predictedDir = direction;
-          if (this.myReversed) predictedDir = -predictedDir;
-
-          this.predictedY += predictedDir * PADDLE_SPEED * dt;
+          if (this.touchActive) {
+            // Touch: move paddle directly toward finger Y (snappy response)
+            let effectiveTarget = this.touchTargetY;
+            if (this.myReversed) {
+              effectiveTarget = ARENA_HEIGHT - this.touchTargetY;
+            }
+            const diff = effectiveTarget - this.predictedY;
+            const maxMove = PADDLE_SPEED * dt;
+            if (Math.abs(diff) <= maxMove) {
+              this.predictedY = effectiveTarget;
+            } else {
+              this.predictedY += Math.sign(diff) * maxMove;
+            }
+          } else {
+            // Keyboard: move at constant speed in direction
+            let predictedDir = direction;
+            if (this.myReversed) predictedDir = -predictedDir;
+            this.predictedY += predictedDir * PADDLE_SPEED * dt;
+          }
 
           // Clamp to arena bounds (matching server logic)
           const halfH = this.myPaddleHeight / 2;
