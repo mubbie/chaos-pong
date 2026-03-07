@@ -1,12 +1,20 @@
 # Chaos Pong
 
-Real-time multiplayer Pong with neon visuals, procedural audio, and chaotic effects. Built with a Go backend (WebSocket game server) and a Phaser 3 frontend.
+Given that Claude is gonna take my job, I used it to help build a fun game to play before the apocalypse.
 
-## Play Online
+**[Play Now — chaos-pong.onrender.com](https://chaos-pong.onrender.com)**
 
-**[chaos-pong.onrender.com](https://chaos-pong.onrender.com)**
+### Features
 
-Open in two browser tabs (or send the link to a friend) and hit **Join Queue**.
+- **1:1 Quickplay** — Get matched with a random opponent instantly
+- **Private Rooms** — Create a room with a code and play 1:1 with friends
+- **4-Player Tournaments** — Single-elimination bracket for the ultimate winner
+- **Spectator Mode** — Invite friends to watch epic battles live
+- **Taunts** — Tilt your opponent with emoji taunts mid-rally
+- **Power-ups** — Big paddle, freeze, cannon, ghost ball, shield, multi-ball, and more chaos
+- **Mobile Support** — Touch controls, on-screen taunts, works on phones and tablets
+
+Built with Go (WebSocket game server) and Phaser 3 (TypeScript frontend).
 
 ## Local Development
 
@@ -34,28 +42,18 @@ The Vite dev server proxies `/ws` and `/api` requests to the Go backend on `:808
 
 ### Controls
 
-| Action    | Keys               |
-| --------- | ------------------ |
-| Move up   | `W` or `Arrow Up`  |
-| Move down | `S` or `Arrow Down`|
+**Desktop:** `W`/`S` or `↑`/`↓` to move, `1`–`6` to taunt, `ESC` to pause.
+
+**Mobile:** Touch and drag to move your paddle. On-screen emoji bar for taunts, ⏸ button to pause.
 
 ## Game Modes
 
-### Quickplay
-
-Join the matchmaking queue and get paired with the next available player. First to 11 points wins (must win by 2 after deuce).
-
-### Private Lobby
-
-Create a private room with an invite code. Share the code with a friend to play directly without the queue.
-
-### Tournament (Best-of-N)
-
-Host a 4-player single-elimination tournament:
-1. Host creates a tournament lobby and shares the invite code
-2. Once 4 players join, the host starts the bracket
-3. Two semi-finals are played, then the winners face off in the final
-4. Configurable best-of-1, best-of-3, or best-of-5 series per round
+| Mode | How it works |
+|------|-------------|
+| **Quickplay** | Join the queue, get paired instantly. First to 11 (win by 2 at deuce). |
+| **Private Room** | Create a room, share the 4-letter code with a friend. |
+| **Tournament** | 4 players, single-elimination bracket. Semi-finals → Final. |
+| **Spectate** | Watch any active match live. Send reactions from the sideline. |
 
 ## Docker
 
