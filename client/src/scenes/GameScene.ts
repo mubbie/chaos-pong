@@ -1976,12 +1976,65 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Both players and regular spectators go to GameOverScene
-    this.scene.start('GameOverScene', {
+    const sceneData = {
       ...data,
       myId: socket.myId,
       you: this.gameData.you,
       opponent: this.gameData.opponent,
+    };
+
+    if (data.isForfeit) {
+      // Show in-game forfeit overlay before transitioning to game-over screen
+      this.showForfeitOverlay();
+      this.time.delayedCall(2000, () => {
+        this.scene.start('GameOverScene', sceneData);
+      });
+      return;
+    }
+
+    // Normal game end — transition immediately
+    this.scene.start('GameOverScene', sceneData);
+  }
+
+  /** Dark overlay with "OPPONENT LEFT" shown for 2s before game-over screen */
+  private showForfeitOverlay(): void {
+    const w = this.cameras.main.width;
+    const h = this.cameras.main.height;
+    const cx = w / 2;
+    const cy = h / 2;
+
+    // Darken the game
+    const bg = this.add.rectangle(cx, cy, w, h, 0x000000, 0.7).setDepth(200);
+    bg.setAlpha(0);
+
+    // Main text
+    const heading = this.add.text(cx, cy - 20, 'OPPONENT LEFT', {
+      fontSize: '36px',
+      color: '#ef4444',
+      fontFamily: 'monospace',
+      fontStyle: 'bold',
+    }).setOrigin(0.5).setDepth(201).setAlpha(0);
+
+    // Subtitle
+    const subtitle = this.add.text(cx, cy + 25, 'You win by forfeit', {
+      fontSize: '16px',
+      color: '#888888',
+      fontFamily: 'monospace',
+    }).setOrigin(0.5).setDepth(201).setAlpha(0);
+
+    // Animate in
+    this.tweens.add({ targets: bg, alpha: 1, duration: 300 });
+    this.tweens.add({
+      targets: heading,
+      alpha: 1,
+      duration: 400,
+      ease: 'Back.easeOut',
+    });
+    this.tweens.add({
+      targets: subtitle,
+      alpha: 1,
+      duration: 300,
+      delay: 200,
     });
   }
 

@@ -84,8 +84,11 @@ export class GameOverScene extends Phaser.Scene {
     // Winner name — slide in from left (skip for spectator since headline already has it)
     let winnerTextY = centerY - 20;
     if (!isSpectator) {
+      const subtitleText = this.result.isForfeit
+        ? 'Won by forfeit'
+        : `${this.result.winnerName} wins`;
       const winnerText = this.add.text(-200, centerY - 20,
-        `${this.result.winnerName} wins`, {
+        subtitleText, {
         fontSize: '20px',
         color: '#888888',
         fontFamily: 'monospace',
