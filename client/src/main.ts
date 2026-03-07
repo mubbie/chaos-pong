@@ -70,8 +70,10 @@ let isPaused = false;
 let inPrivateLobby = false;
 let continueSent = false;
 
-// --- Touch device detection ---
-const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+// --- Mobile device detection ---
+// Use pointer/hover media query to detect phones/tablets (touch-primary devices).
+// This excludes desktop touchscreens which have hover:hover + pointer:fine.
+const isMobileDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 // --- Mobile HUD elements ---
 const mobileHud = document.getElementById('mobile-hud')!;
@@ -347,7 +349,7 @@ socket.on('game_start', (payload: GameStartPayload) => {
     scene: [GameScene, GameOverScene],
     scale: {
       mode: Phaser.Scale.FIT,
-      autoCenter: Phaser.Scale.CENTER_BOTH,
+      autoCenter: Phaser.Scale.NO_CENTER, // CSS flex on #game-container handles centering
     },
     input: {
       touch: true,
@@ -358,7 +360,7 @@ socket.on('game_start', (payload: GameStartPayload) => {
   phaserGame.scene.start('GameScene', { ...payload, isTournament: !!currentTournamentCode });
 
   // Show mobile HUD on touch devices during gameplay
-  if (isTouchDevice) {
+  if (isMobileDevice) {
     mobileHud.classList.remove('hidden');
   }
 });
@@ -449,6 +451,9 @@ setOnPauseChanged((paused: boolean) => {
 // which handles Phaser cleanup. This handler is a safety net to ensure
 // the bracket is always visible after a tournament game ends.
 socket.on('game_end', (payload: GameEndPayload) => {
+  // Hide mobile HUD on game-over screen (no need for taunts/pause there)
+  mobileHud.classList.add('hidden');
+
   if (currentTournamentCode) {
     // Ensure bracket is visible for any tournament participant
     tournamentBracket.classList.remove('hidden');
@@ -745,7 +750,7 @@ function showPauseMenu(): void {
     pauseLeaveBtn.textContent = 'LEAVE MATCH';
   }
   // Toggle desktop/mobile controls in pause menu
-  if (isTouchDevice) {
+  if (isMobileDevice) {
     pauseControlsDesktop.classList.add('hidden');
     pauseControlsMobile.classList.remove('hidden');
     pauseFooterText.textContent = 'Tap ⏸ to resume';
@@ -760,7 +765,7 @@ function hidePauseMenu(): void {
   isPaused = false;
   pauseMenu.classList.add('hidden');
   // Restore mobile HUD when game resumes
-  if (isTouchDevice && phaserGame && !gameContainer.classList.contains('hidden')) {
+  if (isMobileDevice && phaserGame && !gameContainer.classList.contains('hidden')) {
     mobileHud.classList.remove('hidden');
   }
 }
@@ -938,7 +943,7 @@ socket.on('_disconnected', () => {
 });
 
 // --- Touch device: toggle control info panels ---
-if (isTouchDevice) {
+if (isMobileDevice) {
   if (desktopControlsInfo) desktopControlsInfo.classList.add('hidden');
   if (mobileControlsInfo) mobileControlsInfo.classList.remove('hidden');
 }

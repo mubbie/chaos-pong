@@ -17,3 +17,12 @@
   overflow: hidden;
   overscroll-behavior: none;
 }
+
+/* Only show mobile HUD on touch-primary devices (phones/tablets).
+   Desktop touchscreens have hover:hover + pointer:fine for their
+   primary input, so they are excluded. */
+@media (hover: hover) and (pointer: fine) {
+  #mobile-hud {
+    display: none !important;
+  }
+}
