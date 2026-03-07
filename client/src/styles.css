@@ -1,5 +1,72 @@
 @import "tailwindcss";
 
+/* ===== LOBBY VISUAL POLISH ===== */
+
+/* Radial gradient background with subtle depth */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(0, 245, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 50% 100%, rgba(255, 0, 229, 0.02) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Subtle grid texture overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Subtle pulse on the JOIN button when idle and enabled */
+@keyframes neon-pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 245, 255, 0.15); }
+  50% { box-shadow: 0 0 20px rgba(0, 245, 255, 0.25); }
+}
+
+#join-btn:not(:disabled) {
+  animation: neon-pulse 3s ease-in-out infinite;
+}
+
+#join-btn:hover:not(:disabled) {
+  animation: none;
+}
+
+/* Pulsing live dot before stats text */
+#live-stats::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00f5ff;
+  box-shadow: 0 0 6px rgba(0, 245, 255, 0.5);
+  animation: live-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Select element dark dropdown styling */
+#private-score-select option {
+  background: #111;
+  color: #d4d4d4;
+}
+
+/* ===== GAME RULES ===== */
+
 /* Prevent mobile browser scroll/bounce during gameplay */
 #game-container canvas {
   touch-action: none;

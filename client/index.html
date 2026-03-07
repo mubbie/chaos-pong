@@ -7,156 +7,178 @@
   <title>Chaos Pong</title>
   <link rel="stylesheet" href="/src/styles.css">
 </head>
-<body class="bg-black text-white min-h-screen flex items-center justify-center font-mono">
+<body class="bg-[#050510] text-white min-h-screen flex items-center justify-center font-mono relative overflow-x-hidden">
 
   <!-- Lobby -->
-  <div id="lobby" class="text-center">
-    <img src="/logo.svg" alt="Chaos Pong" class="w-80 mx-auto mb-8">
+  <div id="lobby" class="text-center relative z-10 w-full max-w-md mx-auto px-4 py-8">
 
-    <div class="mb-8">
-      <input
-        id="name-input"
-        type="text"
-        placeholder="Enter your name"
-        maxlength="16"
-        class="bg-neutral-900 border border-neutral-700 rounded px-4 py-3 text-center text-lg w-64 focus:outline-none focus:border-neutral-500 placeholder:text-neutral-600"
+    <!-- Logo -->
+    <img src="/logo.svg" alt="Chaos Pong" class="w-80 mx-auto mb-10 drop-shadow-[0_0_40px_rgba(0,245,255,0.15)]">
+
+    <!-- Primary Action Card -->
+    <div class="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-6 mb-8 backdrop-blur-sm">
+      <div class="mb-5">
+        <input
+          id="name-input"
+          type="text"
+          placeholder="Enter your name"
+          maxlength="16"
+          class="bg-white/[0.05] border border-white/10 rounded-lg px-4 py-3 text-center text-lg w-full focus:outline-none focus:border-[#00f5ff]/50 focus:shadow-[0_0_15px_rgba(0,245,255,0.1)] placeholder:text-neutral-600 transition-all duration-200"
+        >
+      </div>
+
+      <button
+        id="join-btn"
+        class="w-full bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-8 py-3.5 rounded-lg text-lg hover:shadow-[0_0_25px_rgba(0,245,255,0.3)] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:shadow-none"
       >
+        JOIN QUEUE
+      </button>
+
+      <div id="queue-status" class="mt-4 text-neutral-400 text-sm h-6"></div>
+      <div id="last-result" class="mt-2 text-neutral-500 text-sm"></div>
     </div>
 
-    <button
-      id="join-btn"
-      class="bg-white text-black font-bold px-8 py-3 rounded text-lg hover:bg-neutral-200 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-    >
-      JOIN QUEUE
-    </button>
-
-    <div id="queue-status" class="mt-6 text-neutral-400 text-sm h-6"></div>
-
-    <div id="last-result" class="mt-8 text-neutral-500 text-sm"></div>
+    <!-- Divider -->
+    <div class="flex items-center gap-3 mb-8">
+      <div class="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+      <span class="text-neutral-600 text-[10px] uppercase tracking-[0.2em]">Or</span>
+      <div class="flex-1 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+    </div>
 
     <!-- Spectate Section -->
-    <div id="spectate-section" class="mt-10 w-full max-w-md">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-neutral-500 text-xs uppercase tracking-wider">Active Matches</h2>
-        <button id="refresh-matches-btn" class="text-neutral-600 text-xs hover:text-neutral-400 transition-colors cursor-pointer">&#8635; Refresh</button>
-      </div>
-      <div id="match-list" class="space-y-2"></div>
-      <p id="no-matches" class="text-neutral-600 text-xs text-center py-4">No active matches</p>
-    </div>
-
-    <!-- Tournament Section -->
-    <div id="tournament-section" class="mt-10 w-full max-w-md">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-neutral-500 text-xs uppercase tracking-wider">Tournament (4 Players)</h2>
-      </div>
-      <div class="flex gap-2 mb-4">
-        <button id="create-tournament-btn" class="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold px-4 py-2 rounded text-sm cursor-pointer transition-colors">CREATE</button>
-        <input id="tournament-code-input" type="text" placeholder="CODE" maxlength="4" class="bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-center text-sm w-24 uppercase focus:outline-none focus:border-neutral-500 placeholder:text-neutral-600">
-        <button id="join-tournament-btn" class="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold px-4 py-2 rounded text-sm cursor-pointer transition-colors">JOIN</button>
+    <div id="spectate-section" class="mb-6 w-full">
+      <div class="bg-white/[0.02] border border-white/[0.05] rounded-xl p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-neutral-400 text-xs uppercase tracking-wider font-bold">Active Matches</h2>
+          <button id="refresh-matches-btn" class="text-neutral-600 text-xs hover:text-[#00f5ff] transition-colors cursor-pointer">&#8635; Refresh</button>
+        </div>
+        <div id="match-list" class="space-y-2"></div>
+        <p id="no-matches" class="text-neutral-600 text-xs text-center py-4">No active matches</p>
       </div>
     </div>
 
-    <!-- Private Match Section -->
-    <div id="private-section" class="mt-6 w-full max-w-md">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-neutral-500 text-xs uppercase tracking-wider">Private Match</h2>
+    <!-- Custom Games Card -->
+    <div class="bg-white/[0.02] border border-white/[0.05] rounded-xl p-4 mb-6 w-full">
+
+      <!-- Tournament Section -->
+      <div id="tournament-section">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-neutral-400 text-xs uppercase tracking-wider font-bold">Tournament (4 Players)</h2>
+        </div>
+        <div class="flex gap-2">
+          <button id="create-tournament-btn" class="bg-white/[0.06] hover:bg-white/10 text-neutral-300 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer transition-all duration-150 border border-white/[0.05] hover:border-[#00f5ff]/30">CREATE</button>
+          <input id="tournament-code-input" type="text" placeholder="CODE" maxlength="4" class="bg-white/[0.05] border border-white/10 rounded-lg px-3 py-2 text-center text-sm w-24 uppercase focus:outline-none focus:border-[#00f5ff]/50 placeholder:text-neutral-600 transition-all duration-200">
+          <button id="join-tournament-btn" class="bg-white/[0.06] hover:bg-white/10 text-neutral-300 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer transition-all duration-150 border border-white/[0.05] hover:border-[#00f5ff]/30">JOIN</button>
+        </div>
       </div>
-      <div class="flex gap-2 mb-2 items-center">
-        <select id="private-score-select" class="bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-neutral-500 cursor-pointer">
-          <option value="5">First to 5</option>
-          <option value="7">First to 7</option>
-          <option value="11" selected>First to 11</option>
-        </select>
-        <button id="create-private-btn" class="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold px-4 py-2 rounded text-sm cursor-pointer transition-colors">CREATE</button>
+
+      <!-- Internal Divider -->
+      <div class="h-px bg-white/[0.05] my-4"></div>
+
+      <!-- Private Match Section -->
+      <div id="private-section">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-neutral-400 text-xs uppercase tracking-wider font-bold">Private Match</h2>
+        </div>
+        <div class="flex gap-2 items-center">
+          <select id="private-score-select" class="bg-white/[0.05] border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-[#ff00e5]/50 cursor-pointer transition-all duration-200">
+            <option value="5">First to 5</option>
+            <option value="7">First to 7</option>
+            <option value="11" selected>First to 11</option>
+          </select>
+          <input id="private-code-input" type="text" placeholder="CODE" maxlength="4" class="bg-white/[0.05] border border-white/10 rounded-lg px-3 py-2 text-center text-sm w-20 uppercase focus:outline-none focus:border-[#ff00e5]/50 placeholder:text-neutral-600 transition-all duration-200">
+          <button id="create-private-btn" class="bg-white/[0.06] hover:bg-white/10 text-neutral-300 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer transition-all duration-150 border border-white/[0.05] hover:border-[#ff00e5]/30">CREATE</button>
+          <button id="join-private-btn" class="bg-white/[0.06] hover:bg-white/10 text-neutral-300 font-bold px-4 py-2 rounded-lg text-sm cursor-pointer transition-all duration-150 border border-white/[0.05] hover:border-[#ff00e5]/30">JOIN</button>
+        </div>
       </div>
-      <div class="flex gap-2 items-center">
-        <input id="private-code-input" type="text" placeholder="CODE" maxlength="4" class="bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-center text-sm w-24 uppercase focus:outline-none focus:border-neutral-500 placeholder:text-neutral-600">
-        <button id="join-private-btn" class="bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold px-4 py-2 rounded text-sm cursor-pointer transition-colors">JOIN</button>
-      </div>
+
     </div>
 
     <!-- Controls Reference -->
-    <div class="mt-10 w-full max-w-md">
-      <button id="controls-toggle-btn" class="text-neutral-600 text-xs hover:text-neutral-400 transition-colors cursor-pointer mx-auto block">HOW TO PLAY ▸</button>
-      <div id="controls-panel" class="hidden mt-3 bg-neutral-900 border border-neutral-800 rounded p-4 text-left">
+    <div class="mb-6 w-full">
+      <button id="controls-toggle-btn" class="text-neutral-500 text-xs hover:text-neutral-300 transition-colors cursor-pointer mx-auto block tracking-wider">HOW TO PLAY &#9656;</button>
+      <div id="controls-panel" class="hidden mt-3 bg-white/[0.03] border border-white/[0.05] rounded-xl p-4 text-left">
         <!-- Desktop controls -->
         <div id="controls-desktop-info" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-          <span class="text-neutral-400 font-bold text-right">↑ ↓  or  W S</span>
+          <span class="text-neutral-300 font-bold text-right">↑ ↓  or  W S</span>
           <span class="text-neutral-500">Move paddle</span>
-          <span class="text-neutral-400 font-bold text-right">1 – 6</span>
+          <span class="text-neutral-300 font-bold text-right">1 – 6</span>
           <span class="text-neutral-500">Send taunt&ensp;😈 🔥 😂 💀 👋 GG</span>
-          <span class="text-neutral-400 font-bold text-right">ESC</span>
+          <span class="text-neutral-300 font-bold text-right">ESC</span>
           <span class="text-neutral-500">Pause / menu</span>
         </div>
         <!-- Mobile controls -->
         <div id="controls-mobile-info" class="hidden text-xs space-y-2">
           <div class="flex items-start gap-3">
-            <span class="text-neutral-400 font-bold flex-shrink-0">Touch &amp; drag</span>
+            <span class="text-neutral-300 font-bold flex-shrink-0">Touch &amp; drag</span>
             <span class="text-neutral-500">Move your paddle up &amp; down</span>
           </div>
           <div class="flex items-start gap-3">
-            <span class="text-neutral-400 font-bold flex-shrink-0">Emoji bar</span>
+            <span class="text-neutral-300 font-bold flex-shrink-0">Emoji bar</span>
             <span class="text-neutral-500">Send taunts to your opponent</span>
           </div>
           <div class="flex items-start gap-3">
-            <span class="text-neutral-400 font-bold flex-shrink-0">⏸ button</span>
+            <span class="text-neutral-300 font-bold flex-shrink-0">⏸ button</span>
             <span class="text-neutral-500">Pause the game / open menu</span>
           </div>
         </div>
-        <div class="mt-3 pt-3 border-t border-neutral-800 text-xs text-neutral-600">
-          <p>First to <span class="text-neutral-400">11</span> wins (win by 2 at deuce).</p>
-          <p class="mt-1">Collect <span class="text-neutral-400">power-ups</span> that spawn on the field — big paddle, freeze, cannon, ghost ball, shield, multi-ball, and more.</p>
+        <div class="mt-3 pt-3 border-t border-white/[0.05] text-xs text-neutral-600">
+          <p>First to <span class="text-neutral-300">11</span> wins (win by 2 at deuce).</p>
+          <p class="mt-1">Collect <span class="text-neutral-300">power-ups</span> that spawn on the field — big paddle, freeze, cannon, ghost ball, shield, multi-ball, and more.</p>
         </div>
       </div>
     </div>
 
     <!-- HTMX live stats -->
-    <div
-      id="live-stats"
-      class="mt-8 text-neutral-600 text-xs"
-      hx-get="/api/stats"
-      hx-trigger="every 5s"
-      hx-swap="innerHTML"
-    ></div>
+    <div class="mt-4 pt-4 border-t border-white/[0.05]">
+      <div
+        id="live-stats"
+        class="text-neutral-500 text-xs flex items-center justify-center gap-2"
+        hx-get="/api/stats"
+        hx-trigger="every 5s"
+        hx-swap="innerHTML"
+      ></div>
+    </div>
+
   </div>
 
   <!-- Private Lobby Overlay (hidden until created) -->
-  <div id="private-lobby" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+  <div id="private-lobby" class="hidden fixed inset-0 bg-[#050510]/95 backdrop-blur-sm flex items-center justify-center z-50">
     <div class="text-center">
-      <h2 class="text-3xl font-bold mb-2">PRIVATE MATCH</h2>
+      <h2 class="text-3xl font-bold mb-2 tracking-wider">PRIVATE MATCH</h2>
       <p class="text-neutral-400 mb-1 text-sm">Share this code with a friend:</p>
-      <p id="private-code-display" class="text-4xl font-bold text-emerald-400 mb-2 tracking-[0.3em]"></p>
+      <p id="private-code-display" class="text-4xl font-bold text-[#ff00e5] mb-2 tracking-[0.3em] drop-shadow-[0_0_20px_rgba(255,0,229,0.3)]"></p>
       <p id="private-score-display" class="text-neutral-400 text-sm mb-6">First to <span id="private-score-value">11</span></p>
       <div class="grid grid-cols-2 gap-3 mb-6 w-80 mx-auto">
-        <div id="private-slot-host" class="bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-300 h-12 flex items-center justify-center"></div>
-        <div id="private-slot-guest" class="bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
+        <div id="private-slot-host" class="bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-300 h-12 flex items-center justify-center"></div>
+        <div id="private-slot-guest" class="bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
       </div>
       <p class="text-neutral-600 text-xs mb-4">Lobby expires in 2 minutes</p>
-      <button id="cancel-private-btn" class="text-neutral-500 text-sm hover:text-neutral-300 transition-colors cursor-pointer">Cancel</button>
+      <button id="cancel-private-btn" class="text-neutral-500 text-sm hover:text-[#ff00e5] transition-colors cursor-pointer">Cancel</button>
     </div>
   </div>
 
   <!-- Tournament Lobby (hidden until created/joined) -->
-  <div id="tournament-lobby" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+  <div id="tournament-lobby" class="hidden fixed inset-0 bg-[#050510]/95 backdrop-blur-sm flex items-center justify-center z-50">
     <div class="text-center">
-      <h2 class="text-3xl font-bold mb-2">TOURNAMENT</h2>
+      <h2 class="text-3xl font-bold mb-2 tracking-wider">TOURNAMENT</h2>
       <p class="text-neutral-400 mb-1 text-sm">Share this code with friends:</p>
-      <p id="tournament-code-display" class="text-4xl font-bold text-cyan-400 mb-6 tracking-[0.3em]"></p>
+      <p id="tournament-code-display" class="text-4xl font-bold text-[#00f5ff] mb-6 tracking-[0.3em] drop-shadow-[0_0_20px_rgba(0,245,255,0.3)]"></p>
       <div id="tournament-slots" class="grid grid-cols-2 gap-3 mb-6 w-80 mx-auto">
-        <div class="tournament-slot bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
-        <div class="tournament-slot bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
-        <div class="tournament-slot bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
-        <div class="tournament-slot bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
+        <div class="tournament-slot bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
+        <div class="tournament-slot bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
+        <div class="tournament-slot bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
+        <div class="tournament-slot bg-white/[0.05] border border-white/10 rounded-lg p-3 text-sm text-neutral-500 h-12 flex items-center justify-center">Waiting...</div>
       </div>
-      <button id="start-tournament-btn" class="hidden bg-cyan-500 text-black font-bold px-8 py-3 rounded text-lg hover:bg-cyan-400 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">START TOURNAMENT</button>
-      <button id="leave-tournament-btn" class="mt-4 text-neutral-500 text-sm hover:text-neutral-300 transition-colors cursor-pointer block mx-auto">Leave Tournament</button>
+      <button id="start-tournament-btn" class="hidden bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-8 py-3 rounded-lg text-lg hover:shadow-[0_0_25px_rgba(0,245,255,0.3)] transition-all duration-200 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed">START TOURNAMENT</button>
+      <button id="leave-tournament-btn" class="mt-4 text-neutral-500 text-sm hover:text-[#00f5ff] transition-colors cursor-pointer block mx-auto">Leave Tournament</button>
     </div>
   </div>
 
   <!-- Tournament Bracket (hidden until tournament starts) -->
-  <div id="tournament-bracket" class="hidden fixed inset-0 bg-black/95 flex items-center justify-center z-50 overflow-y-auto">
+  <div id="tournament-bracket" class="hidden fixed inset-0 bg-[#050510]/95 backdrop-blur-sm flex items-center justify-center z-50 overflow-y-auto">
     <div class="text-center py-8">
-      <h2 id="bracket-header" class="text-2xl font-bold mb-6">BRACKET</h2>
+      <h2 id="bracket-header" class="text-2xl font-bold mb-6 tracking-wider">BRACKET</h2>
       <div id="bracket-display" class="w-[700px] mx-auto"></div>
       <p id="bracket-status" class="text-neutral-400 text-sm mt-4"></p>
       <div id="bracket-continue" class="mt-4"></div>
@@ -164,17 +186,17 @@
       <!-- Champion celebration (hidden until tournament completes) -->
       <div id="champion-celebration" class="hidden mt-6">
         <p class="text-5xl mb-2">&#127942;</p>
-        <p id="champion-text" class="text-4xl font-bold text-yellow-400 mb-1"></p>
+        <p id="champion-text" class="text-4xl font-bold text-yellow-400 mb-1 drop-shadow-[0_0_20px_rgba(250,204,21,0.3)]"></p>
         <p class="text-neutral-500 text-sm mb-4">Tournament Champion</p>
         <div id="champion-recap" class="text-xs text-neutral-400 mb-6 space-y-1"></div>
         <div class="flex gap-3 justify-center">
-          <button id="new-tournament-btn" class="bg-cyan-500 text-black font-bold px-6 py-3 rounded text-sm hover:bg-cyan-400 transition-colors cursor-pointer">NEW TOURNAMENT</button>
-          <button id="bracket-close-btn" class="bg-neutral-800 text-neutral-300 font-bold px-6 py-3 rounded text-sm hover:bg-neutral-700 transition-colors cursor-pointer">RETURN TO LOBBY</button>
+          <button id="new-tournament-btn" class="bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-6 py-3 rounded-lg text-sm hover:shadow-[0_0_20px_rgba(0,245,255,0.3)] transition-all duration-200 cursor-pointer">NEW TOURNAMENT</button>
+          <button id="bracket-close-btn" class="bg-white/[0.06] border border-white/10 text-neutral-300 font-bold px-6 py-3 rounded-lg text-sm hover:bg-white/10 transition-all duration-150 cursor-pointer">RETURN TO LOBBY</button>
         </div>
       </div>
 
       <!-- Non-complete state: close button hidden by default -->
-      <button id="bracket-close-btn-pending" class="hidden mt-6 text-neutral-500 text-sm hover:text-neutral-300 transition-colors cursor-pointer">Return to Lobby</button>
+      <button id="bracket-close-btn-pending" class="hidden mt-6 text-red-400/70 text-sm hover:text-red-400 transition-colors cursor-pointer">Leave Tournament</button>
     </div>
   </div>
 
@@ -199,29 +221,29 @@
   </div>
 
   <!-- Pause Menu Overlay (shown during game on ESC) -->
-  <div id="pause-menu" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
-    <div class="text-center w-80">
-      <h2 class="text-3xl font-bold mb-8 tracking-wider">MENU</h2>
-      <div class="space-y-3">
-        <button id="pause-resume-btn" class="w-full bg-white text-black font-bold px-6 py-3 rounded text-sm hover:bg-neutral-200 transition-colors cursor-pointer">RESUME</button>
-        <button id="pause-spectator-link-btn" class="w-full bg-neutral-800 text-neutral-300 font-bold px-6 py-3 rounded text-sm hover:bg-neutral-700 transition-colors cursor-pointer">COPY SPECTATOR LINK</button>
-        <button id="pause-sound-btn" class="w-full bg-neutral-800 text-neutral-300 font-bold px-6 py-3 rounded text-sm hover:bg-neutral-700 transition-colors cursor-pointer">SOUND: ON</button>
-        <button id="pause-leave-btn" class="w-full bg-neutral-900 text-red-400 font-bold px-6 py-3 rounded text-sm hover:bg-neutral-800 border border-neutral-700 transition-colors cursor-pointer">LEAVE MATCH</button>
+  <div id="pause-menu" class="hidden fixed inset-0 bg-[#050510]/85 backdrop-blur-md flex items-center justify-center z-[100]">
+    <div class="text-center w-80 bg-white/[0.03] border border-white/[0.08] rounded-2xl p-6 shadow-[0_0_60px_rgba(0,0,0,0.5)]">
+      <h2 class="text-2xl font-bold mb-6 tracking-wider text-white">PAUSED</h2>
+      <div class="space-y-2.5">
+        <button id="pause-resume-btn" class="w-full bg-gradient-to-r from-[#00f5ff] to-[#00c8ff] text-black font-bold px-6 py-3 rounded-lg text-sm hover:shadow-[0_0_20px_rgba(0,245,255,0.3)] transition-all duration-200 cursor-pointer">RESUME</button>
+        <button id="pause-spectator-link-btn" class="w-full bg-white/[0.06] border border-white/[0.05] text-neutral-300 font-bold px-6 py-3 rounded-lg text-sm hover:bg-white/10 hover:border-[#00f5ff]/30 transition-all duration-150 cursor-pointer">COPY SPECTATOR LINK</button>
+        <button id="pause-sound-btn" class="w-full bg-white/[0.06] border border-white/[0.05] text-neutral-300 font-bold px-6 py-3 rounded-lg text-sm hover:bg-white/10 hover:border-[#00f5ff]/30 transition-all duration-150 cursor-pointer">SOUND: ON</button>
+        <button id="pause-leave-btn" class="w-full bg-white/[0.03] border border-red-500/20 text-red-400 font-bold px-6 py-3 rounded-lg text-sm hover:bg-red-500/10 hover:border-red-500/40 transition-all duration-150 cursor-pointer">LEAVE MATCH</button>
       </div>
-      <p id="pause-link-status" class="hidden text-green-400 text-xs mt-4"></p>
+      <p id="pause-link-status" class="hidden text-[#00f5ff] text-xs mt-4"></p>
 
       <!-- Controls reference -->
-      <div class="mt-6 pt-5 border-t border-neutral-800">
+      <div class="mt-5 pt-4 border-t border-white/[0.05]">
         <h3 class="text-neutral-500 text-xs uppercase tracking-wider mb-3">Controls</h3>
         <!-- Desktop controls -->
         <div id="pause-controls-desktop" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs text-left mx-auto w-fit">
-          <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">↑ ↓</kbd>
+          <kbd class="text-neutral-300 bg-white/[0.08] border border-white/[0.05] px-1.5 py-0.5 rounded text-center">↑ ↓</kbd>
           <span class="text-neutral-500 self-center">Move paddle</span>
-          <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">W S</kbd>
+          <kbd class="text-neutral-300 bg-white/[0.08] border border-white/[0.05] px-1.5 py-0.5 rounded text-center">W S</kbd>
           <span class="text-neutral-500 self-center">Move paddle (alt)</span>
-          <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">1 – 6</kbd>
+          <kbd class="text-neutral-300 bg-white/[0.08] border border-white/[0.05] px-1.5 py-0.5 rounded text-center">1 – 6</kbd>
           <span id="pause-taunt-label" class="text-neutral-500 self-center">Taunt&ensp;😈 🔥 😂 💀 👋 GG</span>
-          <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">ESC</kbd>
+          <kbd class="text-neutral-300 bg-white/[0.08] border border-white/[0.05] px-1.5 py-0.5 rounded text-center">ESC</kbd>
           <span class="text-neutral-500 self-center">Open / close menu</span>
         </div>
         <!-- Mobile controls -->
@@ -232,7 +254,7 @@
         </div>
       </div>
 
-      <p id="pause-footer-text" class="text-neutral-600 text-xs mt-5">Press ESC to resume</p>
+      <p id="pause-footer-text" class="text-neutral-600 text-xs mt-4">Press ESC to resume</p>
     </div>
   </div>
 
