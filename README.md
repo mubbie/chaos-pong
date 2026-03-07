@@ -1,8 +1,14 @@
-# Chaos Pong
+<p align="center">
+  <img src="client/public/logo.svg" alt="Chaos Pong" width="480">
+</p>
 
-Given that Claude is gonna take my job, I used it to help build a fun game to play before the apocalypse.
+<p align="center">
+  Given that Claude is gonna take my job, I used it to help build a fun game to play before the apocalypse.
+</p>
 
-**[Play Now — chaos-pong.onrender.com](https://chaos-pong.onrender.com)**
+<p align="center">
+  <strong><a href="https://chaos-pong.onrender.com">▶ Play Now — chaos-pong.onrender.com</a></strong>
+</p>
 
 ### Features
 
