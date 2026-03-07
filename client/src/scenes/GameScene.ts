@@ -58,6 +58,7 @@ export class GameScene extends Phaser.Scene {
   private countdownText!: Phaser.GameObjects.Text;
 
   // State
+  private sceneActive: boolean = false;
   private gameData!: GameStartPayload;
   private lastDirection: number = 0;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -452,15 +453,30 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // --- Scene is fully initialized —--
+    this.sceneActive = true;
+
     // --- Subscribe to server messages ---
     const socket = SocketManager.getInstance();
-    this.onGameState = (payload: GameStatePayload) => this.handleGameState(payload);
-    this.onGameEnd = (payload: GameEndPayload) => this.handleGameEnd(payload);
+    this.onGameState = (payload: GameStatePayload) => {
+      if (!this.sceneActive) return;
+      this.handleGameState(payload);
+    };
+    this.onGameEnd = (payload: GameEndPayload) => {
+      if (!this.sceneActive) return;
+      this.handleGameEnd(payload);
+    };
     socket.on('game_state', this.onGameState);
     socket.on('game_end', this.onGameEnd);
-    this.onTaunt = (payload: TauntBroadcastPayload) => this.handleTaunt(payload);
+    this.onTaunt = (payload: TauntBroadcastPayload) => {
+      if (!this.sceneActive) return;
+      this.handleTaunt(payload);
+    };
     socket.on('taunt', this.onTaunt);
-    this.onSpectatorReaction = (payload: SpectatorReactionBroadcast) => this.handleSpectatorReaction(payload);
+    this.onSpectatorReaction = (payload: SpectatorReactionBroadcast) => {
+      if (!this.sceneActive) return;
+      this.handleSpectatorReaction(payload);
+    };
     socket.on('spectator_reaction', this.onSpectatorReaction);
 
     // Spectator-specific listeners
@@ -516,6 +532,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(): void {
+    if (!this.sceneActive) return;
+
     const now = performance.now();
     const dt = Math.min((now - this.lastFrameTime) / 1000, 0.05); // cap at 50ms
     this.lastFrameTime = now;
@@ -1904,6 +1922,7 @@ export class GameScene extends Phaser.Scene {
   // --- Game End ---
 
   private handleGameEnd(data: GameEndPayload): void {
+    this.sceneActive = false;
     const socket = SocketManager.getInstance();
     socket.off('game_state', this.onGameState);
     socket.off('game_end', this.onGameEnd);
@@ -1926,6 +1945,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   shutdown(): void {
+    this.sceneActive = false;
     const socket = SocketManager.getInstance();
     socket.off('game_state', this.onGameState);
     socket.off('game_end', this.onGameEnd);

@@ -70,11 +70,17 @@ export class SocketManager {
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
+      let envelope: Envelope;
       try {
-        const envelope: Envelope = JSON.parse(event.data);
-        this.dispatch(envelope.type, envelope.payload);
+        envelope = JSON.parse(event.data);
       } catch (e) {
         console.error('[socket] failed to parse message', e);
+        return;
+      }
+      try {
+        this.dispatch(envelope.type, envelope.payload);
+      } catch (e) {
+        console.error(`[socket] error in handler for "${envelope.type}"`, e);
       }
     };
   }
