@@ -851,6 +851,7 @@ pauseSoundBtn.addEventListener('click', () => {
 
 pauseLeaveBtn.addEventListener('click', () => {
   hidePauseMenu();
+  mobileHud.classList.add('hidden'); // Hide HUD before returning to lobby
   if (isSpectating) {
     // Leave spectator mode — same cleanup as setOnLeaveSpectate callback
     socket.send('leave_spectate', {});

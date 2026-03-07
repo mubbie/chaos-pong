@@ -26,3 +26,10 @@
     display: none !important;
   }
 }
+
+/* Bulletproof: never show mobile HUD when game container is hidden
+   (lobby, private lobby, tournament screens, etc.).
+   Uses general sibling combinator since mobile-hud follows game-container. */
+#game-container.hidden ~ #mobile-hud {
+  display: none !important;
+}
