@@ -70,6 +70,18 @@ let isPaused = false;
 let inPrivateLobby = false;
 let continueSent = false;
 
+// --- Touch device detection ---
+const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+
+// --- Mobile HUD elements ---
+const mobileHud = document.getElementById('mobile-hud')!;
+const mobilePauseBtn = document.getElementById('mobile-pause-btn')!;
+const mobileControlsInfo = document.getElementById('controls-mobile-info');
+const desktopControlsInfo = document.getElementById('controls-desktop-info');
+const pauseControlsDesktop = document.getElementById('pause-controls-desktop')!;
+const pauseControlsMobile = document.getElementById('pause-controls-mobile')!;
+const pauseFooterText = document.getElementById('pause-footer-text')!;
+
 // --- Socket setup ---
 const socket = SocketManager.getInstance();
 socket.connect();
@@ -344,6 +356,11 @@ socket.on('game_start', (payload: GameStartPayload) => {
 
   // Pass game start data to the first scene (include isSpectator and isTournament)
   phaserGame.scene.start('GameScene', { ...payload, isTournament: !!currentTournamentCode });
+
+  // Show mobile HUD on touch devices during gameplay
+  if (isTouchDevice) {
+    mobileHud.classList.remove('hidden');
+  }
 });
 
 // --- Rematch accepted: destroy Phaser, game_start will arrive shortly ---
@@ -355,6 +372,7 @@ socket.on('rematch_status', (payload: RematchStatusPayload) => {
       phaserGame.destroy(true);
       phaserGame = null;
     }
+    mobileHud.classList.add('hidden');
     gameContainer.innerHTML = '';
     // Don't show lobby — game_start is about to arrive
   }
@@ -370,6 +388,7 @@ setOnPlayAgain(() => {
     phaserGame = null;
   }
   gameContainer.classList.add('hidden');
+  mobileHud.classList.add('hidden');
   gameContainer.innerHTML = '';
   lobby.classList.remove('hidden');
 
@@ -399,6 +418,7 @@ setOnLeaveSpectate(() => {
     phaserGame = null;
   }
   gameContainer.classList.add('hidden');
+  mobileHud.classList.add('hidden');
   gameContainer.innerHTML = '';
 
   if (currentTournamentCode) {
@@ -711,6 +731,7 @@ function showPauseMenu(): void {
   if (!phaserGame || lobby.classList.contains('hidden') === false) return; // Only pause during game
   isPaused = true;
   pauseMenu.classList.remove('hidden');
+  mobileHud.classList.add('hidden'); // Hide mobile HUD behind pause menu
   pauseLinkStatus.classList.add('hidden');
   pauseSoundBtn.textContent = SynthAudio.isMuted() ? 'SOUND: OFF' : 'SOUND: ON';
   // Adjust for spectator mode
@@ -723,11 +744,25 @@ function showPauseMenu(): void {
     pauseTauntLabel.textContent = 'Taunt\u2002😈 🔥 😂 💀 👋 GG';
     pauseLeaveBtn.textContent = 'LEAVE MATCH';
   }
+  // Toggle desktop/mobile controls in pause menu
+  if (isTouchDevice) {
+    pauseControlsDesktop.classList.add('hidden');
+    pauseControlsMobile.classList.remove('hidden');
+    pauseFooterText.textContent = 'Tap ⏸ to resume';
+  } else {
+    pauseControlsDesktop.classList.remove('hidden');
+    pauseControlsMobile.classList.add('hidden');
+    pauseFooterText.textContent = 'Press ESC to resume';
+  }
 }
 
 function hidePauseMenu(): void {
   isPaused = false;
   pauseMenu.classList.add('hidden');
+  // Restore mobile HUD when game resumes
+  if (isTouchDevice && phaserGame && !gameContainer.classList.contains('hidden')) {
+    mobileHud.classList.remove('hidden');
+  }
 }
 
 // ESC key toggles pause menu during game
@@ -755,6 +790,39 @@ pauseResumeBtn.addEventListener('click', () => {
     // Players: send unpause to server
     socket.send('pause_game', {});
   }
+});
+
+// --- Mobile HUD: pause button ---
+mobilePauseBtn.addEventListener('click', (e) => {
+  e.stopPropagation(); // Don't let the tap affect the game canvas
+  if (isPaused) {
+    // Resume
+    if (isSpectating) {
+      hidePauseMenu();
+    } else {
+      socket.send('pause_game', {});
+    }
+  } else if (phaserGame && !gameContainer.classList.contains('hidden')) {
+    if (isSpectating) {
+      showPauseMenu();
+    } else {
+      socket.send('pause_game', {});
+    }
+  }
+});
+
+// --- Mobile HUD: taunt buttons ---
+document.querySelectorAll('.mobile-taunt-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (isPaused) return;
+    const tauntId = parseInt((btn as HTMLElement).dataset.taunt || '1', 10);
+    if (isSpectating) {
+      socket.send('spectator_reaction', { reactionId: tauntId });
+    } else {
+      socket.send('taunt', { tauntId });
+    }
+  });
 });
 
 pauseSpectatorLinkBtn.addEventListener('click', () => {
@@ -868,6 +936,12 @@ socket.on('_disconnected', () => {
     lobby.classList.remove('hidden');
   }
 });
+
+// --- Touch device: toggle control info panels ---
+if (isTouchDevice) {
+  if (desktopControlsInfo) desktopControlsInfo.classList.add('hidden');
+  if (mobileControlsInfo) mobileControlsInfo.classList.remove('hidden');
+}
 
 // Check for auto-spectate on load
 checkAutoSpectate();

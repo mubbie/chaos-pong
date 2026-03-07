@@ -79,13 +79,29 @@
     <div class="mt-10 w-full max-w-md">
       <button id="controls-toggle-btn" class="text-neutral-600 text-xs hover:text-neutral-400 transition-colors cursor-pointer mx-auto block">HOW TO PLAY ▸</button>
       <div id="controls-panel" class="hidden mt-3 bg-neutral-900 border border-neutral-800 rounded p-4 text-left">
-        <div class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+        <!-- Desktop controls -->
+        <div id="controls-desktop-info" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
           <span class="text-neutral-400 font-bold text-right">↑ ↓  or  W S</span>
           <span class="text-neutral-500">Move paddle</span>
           <span class="text-neutral-400 font-bold text-right">1 – 6</span>
           <span class="text-neutral-500">Send taunt&ensp;😈 🔥 😂 💀 👋 GG</span>
           <span class="text-neutral-400 font-bold text-right">ESC</span>
           <span class="text-neutral-500">Pause / menu</span>
+        </div>
+        <!-- Mobile controls -->
+        <div id="controls-mobile-info" class="hidden text-xs space-y-2">
+          <div class="flex items-start gap-3">
+            <span class="text-neutral-400 font-bold flex-shrink-0">Touch &amp; drag</span>
+            <span class="text-neutral-500">Move your paddle up &amp; down</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-neutral-400 font-bold flex-shrink-0">Emoji bar</span>
+            <span class="text-neutral-500">Send taunts to your opponent</span>
+          </div>
+          <div class="flex items-start gap-3">
+            <span class="text-neutral-400 font-bold flex-shrink-0">⏸ button</span>
+            <span class="text-neutral-500">Pause the game / open menu</span>
+          </div>
         </div>
         <div class="mt-3 pt-3 border-t border-neutral-800 text-xs text-neutral-600">
           <p>First to <span class="text-neutral-400">11</span> wins (win by 2 at deuce).</p>
@@ -165,6 +181,23 @@
   <!-- Game container (hidden until match starts) -->
   <div id="game-container" class="hidden w-screen h-screen flex items-center justify-center bg-black"></div>
 
+  <!-- Mobile game HUD (hidden until match starts, only visible on touch devices) -->
+  <div id="mobile-hud" class="hidden fixed z-[90] inset-x-0 pointer-events-none">
+    <!-- Pause button (top-right) -->
+    <div class="absolute top-3 right-3 pointer-events-auto">
+      <button id="mobile-pause-btn" class="bg-black/50 text-white text-xl w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20 active:bg-white/20">⏸</button>
+    </div>
+    <!-- Taunt bar (bottom) -->
+    <div class="absolute bottom-4 left-1/2 -translate-x-1/2 pointer-events-auto flex gap-2">
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="1">😈</button>
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="2">🔥</button>
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="3">😂</button>
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="4">💀</button>
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="5">👋</button>
+      <button class="mobile-taunt-btn bg-black/50 text-2xl w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/10 active:bg-white/20" data-taunt="6">🤝</button>
+    </div>
+  </div>
+
   <!-- Pause Menu Overlay (shown during game on ESC) -->
   <div id="pause-menu" class="hidden fixed inset-0 bg-black/80 flex items-center justify-center z-[100]">
     <div class="text-center w-80">
@@ -180,7 +213,8 @@
       <!-- Controls reference -->
       <div class="mt-6 pt-5 border-t border-neutral-800">
         <h3 class="text-neutral-500 text-xs uppercase tracking-wider mb-3">Controls</h3>
-        <div id="pause-controls-content" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs text-left mx-auto w-fit">
+        <!-- Desktop controls -->
+        <div id="pause-controls-desktop" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs text-left mx-auto w-fit">
           <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">↑ ↓</kbd>
           <span class="text-neutral-500 self-center">Move paddle</span>
           <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">W S</kbd>
@@ -190,9 +224,15 @@
           <kbd class="text-neutral-300 bg-neutral-800 px-1.5 py-0.5 rounded text-center">ESC</kbd>
           <span class="text-neutral-500 self-center">Open / close menu</span>
         </div>
+        <!-- Mobile controls -->
+        <div id="pause-controls-mobile" class="hidden text-xs text-neutral-500 space-y-1.5 text-left mx-auto w-fit">
+          <p><span class="text-neutral-300">Touch &amp; drag</span> — Move paddle</p>
+          <p><span class="text-neutral-300">Emoji bar</span> — Send taunts</p>
+          <p><span class="text-neutral-300">⏸ button</span> — Pause / menu</p>
+        </div>
       </div>
 
-      <p class="text-neutral-600 text-xs mt-5">Press ESC to resume</p>
+      <p id="pause-footer-text" class="text-neutral-600 text-xs mt-5">Press ESC to resume</p>
     </div>
   </div>
 
