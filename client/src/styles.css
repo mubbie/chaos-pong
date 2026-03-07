@@ -7,10 +7,13 @@
   -webkit-user-select: none;
 }
 
-/* Prevent pull-to-refresh when game is active */
+/* Full-viewport game container with centered canvas */
 #game-container:not(.hidden) {
-  overscroll-behavior: none;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   position: fixed;
   inset: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
