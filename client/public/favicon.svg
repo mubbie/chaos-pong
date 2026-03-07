@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0a0a2e"/>
+  <!-- Cyan paddle (left) -->
+  <rect x="4" y="9" width="3" height="14" rx="1.5" fill="#00f5ff"/>
+  <!-- Magenta paddle (right) -->
+  <rect x="25" y="9" width="3" height="14" rx="1.5" fill="#ff00e5"/>
+  <!-- Ball glow -->
+  <circle cx="16" cy="16" r="5" fill="#ffffff" opacity="0.15"/>
+  <!-- Ball -->
+  <circle cx="16" cy="16" r="3" fill="#ffffff"/>
+  <!-- Center line -->
+  <line x1="16" y1="4" x2="16" y2="7" stroke="#6b21a8" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/>
+  <line x1="16" y1="25" x2="16" y2="28" stroke="#6b21a8" stroke-width="1" stroke-dasharray="2 2" opacity="0.5"/>
+</svg>
